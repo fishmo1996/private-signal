@@ -32,12 +32,13 @@ export function defaultApiConfig() {
     model: '',
     baseUrl: '',                 // custom 供應商用
     maxReplyChars: { dm: 800, group: 1200, story: 4000 }, // 每模式一則回覆的字數上限
-    contextBudget: 20000,        // 上下文預算(概略 token 數,供未來裁切用)
+    contextBudget: 20000,        // 上下文預算(字數):對話歷史由新到舊裝進 prompt,裝滿即止
     useRealApi: false,           // 總開關:開啟後對話使用真實 AI
     modelList: [],               // 「取得最新模型」的快取,供下拉選單使用
     temperature: 1.0,            // 溫度:創作建議 0.9~1.2
     topP: 0.95,
     thinkingBudget: '',          // Gemini 思考預算:留空=模型預設,0=關閉思考(省額度)
+    safetyLevel: 'default',      // Gemini 內容安全:default | relaxed | none(官方 safetySettings 參數)
     presets: [null, null, null], // P1~P3:{name, provider, apiKey, model, baseUrl}
   };
 }
@@ -172,6 +173,14 @@ export function buildChatRequest(cfg, { system, messages, meta }) {
           parts.push({ text: m.speaker ? `${m.speaker}:${m.content}` : (m.content || '(傳了一張圖片)') });
           return { role: m.role === 'user' ? 'user' : 'model', parts };
         }),
+        ...(cfg.safetyLevel && cfg.safetyLevel !== 'default' ? {
+          safetySettings: ['HARM_CATEGORY_HARASSMENT', 'HARM_CATEGORY_HATE_SPEECH',
+            'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'HARM_CATEGORY_DANGEROUS_CONTENT']
+            .map((category) => ({
+              category,
+              threshold: cfg.safetyLevel === 'none' ? 'BLOCK_NONE' : 'BLOCK_ONLY_HIGH',
+            })),
+        } : {}),
         generationConfig: {
           maxOutputTokens: maxTokens,
           temperature: cfg.temperature ?? 1.0,
@@ -266,27 +275,40 @@ export async function generateReply(cfg, prompt) {
       message: `「${cfg.model}」看起來是顯示名稱,不是 API 模型 id。請到設定按「↻ 取得最新模型」,從下拉選單挑選(正確格式像 gemini-flash-lite-latest)`,
     };
   }
-  try {
-    const req = buildChatRequest(cfg, prompt);
-    const res = await fetch(req.url, {
-      method: 'POST',
-      headers: req.headers,
-      body: JSON.stringify(req.body),
-    });
-    if (!res.ok) {
-      const hint = { 401: '金鑰無效', 403: '金鑰無權限', 429: '達到速率/每日額度限制,稍後再試' }[res.status] || '';
-      let detail = '';
-      try { detail = (await res.json())?.error?.message || ''; } catch { /* noop */ }
-      return { ok: false, message: `HTTP ${res.status}${hint ? `(${hint})` : ''}${detail ? `:${detail.slice(0, 120)}` : ''}` };
+  // 暫時性錯誤(429 速率限制、5xx、網路抖動)自動退避重試 2 次;金鑰類錯誤不重試。
+  const RETRYABLE = new Set([429, 500, 502, 503, 529]);
+  const MAX_ATTEMPTS = 3;
+  let lastMessage = '';
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * attempt));
+    try {
+      const req = buildChatRequest(cfg, prompt);
+      const res = await fetch(req.url, {
+        method: 'POST',
+        headers: req.headers,
+        body: JSON.stringify(req.body),
+      });
+      if (!res.ok) {
+        const hint = { 401: '金鑰無效', 403: '金鑰無權限', 429: '達到速率/每日額度限制' }[res.status] || '';
+        let detail = '';
+        try { detail = (await res.json())?.error?.message || ''; } catch { /* noop */ }
+        lastMessage = `HTTP ${res.status}${hint ? `(${hint})` : ''}${detail ? `:${detail.slice(0, 120)}` : ''}`;
+        if (RETRYABLE.has(res.status) && attempt < MAX_ATTEMPTS - 1) continue;
+        if (RETRYABLE.has(res.status)) lastMessage += '(已自動重試 2 次,請稍後再送一次,你的輸入還在)';
+        return { ok: false, message: lastMessage };
+      }
+      const data = await res.json();
+      const text = extractReplyText(cfg.provider, data).trim();
+      if (!text) return { ok: false, message: '模型回傳了空內容(可能被安全過濾或輸出長度不足)' };
+      const cap = prompt.meta?.maxReplyChars || 800;
+      return { ok: true, text: text.length > cap ? `${text.slice(0, cap)}…` : text };
+    } catch (err) {
+      lastMessage = `連線失敗:${err.message}`;
+      if (attempt < MAX_ATTEMPTS - 1) continue;
+      return { ok: false, message: `${lastMessage}(已自動重試 2 次)` };
     }
-    const data = await res.json();
-    const text = extractReplyText(cfg.provider, data).trim();
-    if (!text) return { ok: false, message: '模型回傳了空內容(可能被安全過濾或輸出長度不足)' };
-    const cap = prompt.meta?.maxReplyChars || 800;
-    return { ok: true, text: text.length > cap ? `${text.slice(0, cap)}…` : text };
-  } catch (err) {
-    return { ok: false, message: `連線失敗:${err.message}` };
   }
+  return { ok: false, message: lastMessage || '未知錯誤' };
 }
 
 /* ------------------------------------------------------------
@@ -297,7 +319,24 @@ function escapeRegex(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** 刮掉模型愛加的「名字:」前綴(整段開頭與每行開頭都處理;容忍名稱前後空白、粗體與引號包裹)。 */
+/**
+ * 輸出替換規則(設定 → 提示詞):對所有 AI 輸出做「找→換」。
+ * 例:把模型愛用的 *動作* 星號體換成(動作)。無效的 regex 會被安全跳過。
+ */
+export function applyOutputRules(text) {
+  let out = String(text || '');
+  const rules = getState()?.settings?.outputRules || [];
+  for (const r of rules) {
+    if (!r?.enabled || !r.find) continue;
+    try {
+      if (r.regex) out = out.replace(new RegExp(r.find, 'g'), r.replace ?? '');
+      else out = out.split(r.find).join(r.replace ?? '');
+    } catch { /* 無效規則跳過,不炸輸出 */ }
+  }
+  return out;
+}
+
+/** 刮掉模型愛加的「名字:」前綴;所有 AI 輸出的統一後處理點(含輸出替換規則)。 */
 export function stripNamePrefix(text, names = []) {
   let out = String(text || '');
   const list = (Array.isArray(names) ? names : [names])
@@ -311,7 +350,7 @@ export function stripNamePrefix(text, names = []) {
     );
     out = out.replace(re, '').replace(re, ''); // 刮兩次,處理「名字:名字:」的怪輸出
   }
-  return out.trim();
+  return applyOutputRules(out).trim();
 }
 
 /**
@@ -319,7 +358,7 @@ export function stripNamePrefix(text, names = []) {
  * 模型偶爾會包 markdown 圍欄或講廢話,盡量撈出 JSON;
  * 真的解析不了就把整段當成第一位參與者的單則回覆,不浪費這次呼叫。
  */
-export function parseGroupReplies(text, participants) {
+export function parseGroupReplies(text, participants, maxReplies = 3) {
   const names = participants.map((c) => c.name);
   let raw = String(text || '').trim()
     .replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
@@ -348,7 +387,7 @@ export function parseGroupReplies(text, participants) {
       || participants.find((p) => name && (p.name.includes(name) || name.includes(p.name)));
     if (!c) continue;
     out.push({ characterId: c.id, content: stripNamePrefix(item.content, names) });
-    if (out.length >= 3) break;
+    if (out.length >= maxReplies) break;
   }
   return out;
 }

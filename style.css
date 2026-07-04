@@ -1442,3 +1442,223 @@ body.theme-sage .home-dock { background: rgba(255, 255, 255, 0.65); }
 
 /* 玩家 App 色調 */
 .tone-g .app-glyph { color: #c88ca8; }
+
+/* 手機無 hover:訊息操作鈕常駐淡顯 */
+.msg-row .remember-btn,
+.msg-narrator .remember-btn,
+.msg-system .remember-btn { opacity: 0.45; }
+.msg-row:hover .remember-btn,
+.msg-narrator:hover .remember-btn,
+.msg-system:hover .remember-btn,
+.remember-btn:focus-visible { opacity: 1; }
+
+.summary-item { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 6px; }
+.summary-item .mem-edit { flex: 1; }
+
+.prompt-inspect {
+  max-height: 300px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11.5px;
+  line-height: 1.6;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  color: var(--ink-dim);
+}
+body.theme-sage .prompt-inspect { background: rgba(255, 255, 255, 0.6); }
+
+.quick-replies {
+  display: flex;
+  gap: 6px;
+  padding: 6px 14px 0;
+  flex-wrap: wrap;
+}
+.quick-replies .mini-btn { opacity: 0.75; }
+.quick-replies .mini-btn:hover { opacity: 1; }
+
+/* ---------------- 字體大小(閱讀主面積連動) ---------------- */
+
+:root { --fs-mult: 1; }
+body.font-sm { --fs-mult: 0.92; }
+body.font-lg { --fs-mult: 1.12; }
+body.font-xl { --fs-mult: 1.26; }
+
+.bubble,
+.msg-narrator,
+.composer textarea,
+.comment-body,
+.post-body,
+.diary-content,
+.list-preview,
+.shared-post-body,
+.mem-item,
+.panel-note,
+.wb-entry-content { font-size: calc(13.5px * var(--fs-mult)); }
+.list-title,
+.comment-author,
+.post-author { font-size: calc(14px * var(--fs-mult)); }
+.bubble { line-height: calc(1.6 * min(var(--fs-mult), 1.08)); }
+
+/* 正文行動選項 */
+.story-choices { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.choice-btn {
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, var(--glass));
+  color: var(--ink);
+  font-size: calc(13px * var(--fs-mult));
+  cursor: pointer;
+  transition: background .15s;
+}
+.choice-btn:hover { background: color-mix(in srgb, var(--accent) 18%, var(--glass)); }
+
+/* ---------------- App 圖示包 ---------------- */
+
+.app-glyph.has-img { padding: 0; overflow: hidden; }
+.app-glyph.has-img img,
+.icon-slot-preview.has-img img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  display: block;
+}
+
+.icon-pack-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px 6px;
+  margin: 8px 0;
+}
+.icon-slot { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.icon-slot-preview {
+  width: 52px; height: 52px;
+  border-radius: 14px;
+  border: 1px dashed color-mix(in srgb, var(--ink) 30%, transparent);
+  background: var(--glass);
+  display: grid; place-items: center;
+  font-size: 19px;
+  color: var(--ink-dim);
+  cursor: pointer;
+  padding: 0; overflow: hidden;
+}
+.icon-slot-preview.has-img { border-style: solid; }
+.icon-slot-label { font-size: 10.5px; color: var(--ink-faint); }
+
+/* ============================================================
+   甜莓主題:奶油粉底+莓果點綴,配粉嫩像素圖示包
+   ============================================================ */
+
+body.theme-berry {
+  --bg-deep: #f3dfe3;
+  --bg-mid: #f9ebee;
+  --bg-soft: #fdf5f6;
+  --ink: #5c4049;
+  --ink-dim: #91707b;
+  --ink-faint: #bda0a9;
+  --line: rgba(150, 90, 110, 0.16);
+  --glass: rgba(255, 252, 253, 0.6);
+  --glass-strong: rgba(255, 252, 253, 0.85);
+  --accent: #d4708f;
+  --danger: #c25c5c;
+  background:
+    radial-gradient(1000px 600px at 15% -5%, rgba(244, 200, 212, 0.55), transparent 60%),
+    radial-gradient(900px 700px at 100% 100%, rgba(214, 226, 244, 0.5), transparent 55%),
+    linear-gradient(165deg, #f7e4e9 0%, #fbeff1 45%, #efe6f0 100%);
+}
+body.theme-berry .phone {
+  border-color: rgba(160, 100, 120, 0.25);
+  background:
+    radial-gradient(ellipse 90% 45% at 50% -5%, rgba(232, 170, 190, 0.20), transparent 70%),
+    linear-gradient(175deg, #fdf3f5 0%, #f9e9ee 55%, #f2e4ef 100%);
+  box-shadow:
+    0 30px 70px rgba(170, 100, 125, 0.25),
+    0 0 60px rgba(212, 112, 143, 0.10),
+    inset 0 1px 1px rgba(255, 255, 255, 0.92),
+    inset 0 0 24px rgba(230, 185, 200, 0.18);
+}
+body.theme-berry .home-dock { background: rgba(255, 252, 253, 0.72); }
+body.theme-berry .dock-layout .app-glyph,
+body.theme-berry .home-dock .app-glyph {
+  background: rgba(255, 252, 253, 0.9);
+  border-color: rgba(200, 130, 155, 0.28);
+  box-shadow: 0 4px 14px rgba(180, 100, 130, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+body.theme-berry .prompt-inspect { background: rgba(255, 255, 255, 0.65); }
+body.theme-berry .bubble.user-bubble { background: color-mix(in srgb, var(--accent) 22%, white); }
+
+/* ---------------- 回憶相簿 ---------------- */
+
+.album-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+.album-cell {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--glass);
+  padding: 0;
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+}
+.album-cell img { width: 100%; height: 110px; object-fit: cover; display: block; }
+.album-caption {
+  font-size: calc(11.5px * var(--fs-mult));
+  color: var(--ink-dim);
+  padding: 6px 8px;
+  text-align: left;
+  line-height: 1.4;
+}
+.album-full {
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  border-radius: 12px;
+  margin-bottom: 10px;
+  display: block;
+}
+
+/* ---------------- 語音訊息 ---------------- */
+
+.bubble.voice-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  min-width: 140px;
+  user-select: none;
+}
+.voice-play { font-size: 13px; opacity: 0.85; }
+.voice-wave { display: inline-flex; align-items: center; gap: 2px; height: 16px; }
+.voice-wave i {
+  width: 3px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.65;
+}
+.voice-wave i:nth-child(1) { height: 6px; }
+.voice-wave i:nth-child(2) { height: 12px; }
+.voice-wave i:nth-child(3) { height: 8px; }
+.voice-wave i:nth-child(4) { height: 15px; }
+.voice-wave i:nth-child(5) { height: 7px; }
+.voice-wave i:nth-child(6) { height: 13px; }
+.voice-wave i:nth-child(7) { height: 9px; }
+.voice-wave i:nth-child(8) { height: 5px; }
+.voice-secs { font-size: 11px; opacity: 0.7; }
+.voice-transcript {
+  font-size: calc(11.5px * var(--fs-mult));
+  color: var(--ink-faint);
+  margin-top: 3px;
+  line-height: 1.5;
+  max-width: 78%;
+}
+.voice-sliders { display: flex; gap: 10px; align-items: flex-end; }
+.voice-sliders .field { flex: 1; }
+.voice-sliders .mini-btn { margin-bottom: 8px; }

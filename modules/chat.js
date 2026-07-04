@@ -5,11 +5,12 @@
  * 取用角色設定、玩家設定與可見記憶,讓未來換成真實 AI 時資料流一致。
  */
 
-import {
+import { getCharacter,
   getState, genId, persist, getRoom, getRoomMessages, getRoomCharacters,
 } from './state.js';
-import { buildPrompt, buildGroupPrompt } from './prompt.js';
+import { buildPrompt, buildGroupPrompt, buildStoryPrompt } from './prompt.js';
 import { getApiConfig, generateReply, stripNamePrefix, parseGroupReplies } from './api.js';
+import { extractVoiceTag } from './voice.js';
 
 /* ---------------- 基礎工具 ---------------- */
 
@@ -62,7 +63,7 @@ function memoryHintOf(prompt, seed) {
   return m.content.length > 24 ? m.content.slice(0, 24) + '…' : m.content;
 }
 
-function appendMessage(roomId, { role, senderId, content, image = null, sharedPost = null }) {
+function appendMessage(roomId, { role, senderId, content, image = null, sharedPost = null, choices = null, voice = false }) {
   const msgs = getRoomMessages(roomId);
   const msg = {
     id: genId('msg'),
@@ -71,6 +72,8 @@ function appendMessage(roomId, { role, senderId, content, image = null, sharedPo
     content,
     ...(image ? { image } : {}),
     ...(sharedPost ? { sharedPost } : {}),   // {postId, authorName, excerpt, image}:引用的貼文卡
+    ...(choices && choices.length ? { choices } : {}), // 正文行動選項(僅最後一則顯示)
+    ...(voice ? { voice: true } : {}),                 // 語音訊息(以聲波樣式呈現,點播用 TTS 唸)
     createdAt: Date.now(),
   };
   msgs.push(msg);
@@ -293,10 +296,12 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
         notify({ typingBy: character.name });
         const r = await generateReply(cfg, prompt);
         if (r.ok) {
+          const vt = extractVoiceTag(stripNamePrefix(r.text, [character.name]));
           appendMessage(roomId, {
             role: 'character',
             senderId: character.id,
-            content: stripNamePrefix(r.text, [character.name]),
+            content: vt.content,
+            ...(vt.voice ? { voice: true } : {}),
           });
         } else {
           appendMessage(roomId, {
@@ -369,12 +374,14 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
       const chars = getRoomCharacters(room);
       if (cfgS.useRealApi && cfgS.apiKey && cfgS.model && chars[0]) {
         notify({ typingBy: '場景' });
-        const r = await generateReply(cfgS, buildPrompt({ character: chars[0], roomId }));
+        const r = await generateReply(cfgS, buildStoryPrompt({ roomId }));
         if (r.ok) {
+          const parsed = extractStoryChoices(stripNamePrefix(r.text, chars.map((c) => c.name)));
           appendMessage(roomId, {
             role: 'narrator',
             senderId: chars[0].id,
-            content: stripNamePrefix(r.text, chars.map((c) => c.name)),
+            content: parsed.content,
+            ...(parsed.choices.length ? { choices: parsed.choices } : {}),
           });
         } else {
           appendMessage(roomId, { role: 'system', senderId: 'system', content: `AI 回覆失敗:${r.message}。你的訊息已保留。` });
@@ -383,6 +390,8 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
         return;
       }
       const { narration, dialogue, speakerId } = generateMockStoryReply({ room, userText: text, msgCount });
+      const mockChoices = getState().settings?.storyChoices
+        ? ['繼續觀察', `回應${getRoomCharacters(room)[0]?.name || '對方'}`, '轉身離開'] : [];
       notify({ typingBy: '場景' });
       await sleep(900);
       appendMessage(roomId, { role: 'narrator', senderId: 'system', content: narration });
@@ -394,6 +403,7 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
         role: speakerId === 'system' ? 'system' : 'character',
         senderId: speakerId,
         content: dialogue,
+        ...(mockChoices.length ? { choices: mockChoices } : {}),
       });
       await persist();
       notify({});
@@ -424,6 +434,103 @@ export async function deleteMessage(roomId, messageId) {
 }
 
 /* ------------------------------------------------------------
+ * 群聊自燃:角色們自己聊起來(↻ 觸發,與其他刷新共用節流哲學)
+ * ------------------------------------------------------------ */
+
+export function selfChatCooldownLeft() {
+  const state = getState();
+  const cooldownMs = (state.settings.autoPostCooldownMin ?? 10) * 60000;
+  return Math.max(0, Math.ceil(((state.selfChatLastRefresh || 0) + cooldownMs - Date.now()) / 1000));
+}
+
+/**
+ * 讓群聊裡的角色們自己聊 2~5 則(不需要玩家先說話)。
+ * 素材=他們共同知道的事(群內對話/公開動態/圈子共享記憶/彼此關係);
+ * 任何人的 DM 私密內容都不會進來。
+ */
+export async function selfChat(roomId, notify, opts = {}) {
+  const state = getState();
+  const room = getRoom(roomId);
+  if (!room || room.type !== 'group' || busyRoomIds.has(roomId)) {
+    return { ok: false, message: '這裡不能自聊' };
+  }
+  if (!opts.force) {
+    const left = selfChatCooldownLeft();
+    if (left > 0) return { ok: false, message: `再等 ${Math.ceil(left / 60)} 分鐘可以再刷新` };
+  }
+  state.selfChatLastRefresh = Date.now();
+  await persist();
+
+  busyRoomIds.add(roomId);
+  try {
+    const participants = getRoomCharacters(room);
+    const cfg = getApiConfig();
+    if (cfg.useRealApi && cfg.apiKey && cfg.model) {
+      const prompt = buildGroupPrompt({ roomId, selfTalk: true });
+      prompt.messages = [
+        ...prompt.messages,
+        { role: 'user', content: '(群組安靜了一陣子,你們之中有人先開口。)' },
+      ];
+      notify({ typingBy: participants[0]?.name || '' });
+      const r = await generateReply(cfg, prompt);
+      if (!r.ok) return { ok: false, message: r.message };
+      const replies = parseGroupReplies(r.text, participants, 5);
+      if (!replies.length) return { ok: false, message: '這次大家都沒開口,再試一次' };
+      for (const [i, rep] of replies.entries()) {
+        notify({ typingBy: getCharacter(rep.characterId)?.name || '' });
+        // eslint-disable-next-line no-await-in-loop
+        await sleep(700 + i * 500);
+        appendMessage(roomId, { role: 'character', senderId: rep.characterId, content: rep.content });
+        // eslint-disable-next-line no-await-in-loop
+        await persist();
+        notify({});
+      }
+      notify({ typingBy: '' });
+      return { ok: true, count: replies.length };
+    }
+    // mock:兩三句互虧
+    const seed = hashStr(roomId) + Math.floor(Date.now() / 60000);
+    const [c1, c2] = [participants[seed % participants.length], participants[(seed + 1) % participants.length]];
+    const lastUser = getRoomMessages(roomId).filter((m) => m.role === 'user').slice(-1)[0];
+    const topic = lastUser ? echoOf(lastUser.content) : '最近那件事';
+    const lines = [
+      { c: c1, t: `欸,說到${topic},你們怎麼看?` },
+      { c: c2, t: `${traitOf(c2) ? `我這種${traitOf(c2)}的人` : '我'}只想說:先吃飯再說。` },
+      { c: c1, t: '……你每次都這樣。' },
+    ];
+    for (const [i, l] of lines.entries()) {
+      if (!l.c) continue;
+      notify({ typingBy: l.c.name });
+      // eslint-disable-next-line no-await-in-loop
+      await sleep(600 + i * 400);
+      appendMessage(roomId, { role: 'character', senderId: l.c.id, content: l.t });
+      // eslint-disable-next-line no-await-in-loop
+      await persist();
+      notify({});
+    }
+    notify({ typingBy: '' });
+    return { ok: true, count: lines.length };
+  } finally {
+    busyRoomIds.delete(roomId);
+  }
+}
+
+/** 從正文輸出抽出「▷ 選項」行:回傳 {content, choices}。 */
+export function extractStoryChoices(text) {
+  const lines = String(text || '').split('\n');
+  const choices = [];
+  const body = [];
+  for (const line of lines) {
+    const t = line.trim();
+    if (/^[▷▶>]\s*/.test(t)) {
+      const c = t.replace(/^[▷▶>]\s*/, '').trim();
+      if (c) choices.push(c);
+    } else body.push(line);
+  }
+  return { content: body.join('\n').trim(), choices: choices.slice(0, 4) };
+}
+
+/* ------------------------------------------------------------
  * 角色主動傳訊(刷新觸發,與自主發文同一套節流哲學)
  * ------------------------------------------------------------ */
 
@@ -444,6 +551,7 @@ export function proactivityScoreFor(roomId) {
   const character = getRoomCharacters(room)[0];
   if (!character) return { score: 0, reason: '' };
 
+  if (character.noPhone) return { score: 0, reason: '' };
   const level = character.proactivity || 'mid';
   if (level === 'off') return { score: 0, reason: '' };
   let score = { low: 0.5, mid: 1.0, high: 1.8 }[level] || 1.0;
@@ -543,7 +651,11 @@ export async function refreshChats(opts = {}) {
   }
   if (!content) return { ok: true };
 
-  appendMessage(room.id, { role: 'character', senderId: character.id, content });
+  const vtP = extractVoiceTag(content);
+  appendMessage(room.id, {
+    role: 'character', senderId: character.id, content: vtP.content,
+    ...(vtP.voice ? { voice: true } : {}),
+  });
   room.unread = true;
   await persist();
   return { ok: true, from: character.name };

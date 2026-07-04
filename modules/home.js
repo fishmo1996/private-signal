@@ -30,6 +30,7 @@ function firstLine(text, max) {
 /** 主畫面 App 圖示定義(原創幾何字符 + CSS 色塊,不使用真實平台圖示)。 */
 export const HOME_APPS = [
   { id: 'story',    label: '正文',   view: 'story-list', glyph: '❖', tone: 'c' },
+  { id: 'album',    label: '相簿',   view: 'album',      glyph: '✧', tone: 'b' },
   { id: 'player',   label: '玩家',   view: 'player',     glyph: '✿', tone: 'g' },
   { id: 'worldbook', label: '世界書', view: 'worldbook',  glyph: '▤', tone: 'f' },
 ];
@@ -66,7 +67,7 @@ export function buildHomeHTML() {
     || state.characters[0]
     || null;
 
-  const statusCard = current
+  const statusCard = (state.settings?.showStatusCard === false) ? '' : current
     ? `
       <button class="home-status" data-status-char="${esc(current.id)}"
               style="--c:${esc(current.themeColor)}" aria-label="查看 ${esc(current.name)}">
@@ -87,9 +88,12 @@ export function buildHomeHTML() {
         </span>
       </button>`;
 
+  const customIcons = state.settings?.appIcons || {};
   const iconOf = (app) => `
     <button class="app-icon tone-${app.tone}" data-go="${esc(app.view)}" aria-label="開啟${esc(app.label)}">
-      <span class="app-glyph" aria-hidden="true">${app.glyph}</span>
+      <span class="app-glyph ${customIcons[app.id] ? 'has-img' : ''}" aria-hidden="true">${
+  customIcons[app.id] ? `<img src="${customIcons[app.id]}" alt="">` : app.glyph
+}</span>
       <span class="app-label">${esc(app.label)}</span>
     </button>`;
 

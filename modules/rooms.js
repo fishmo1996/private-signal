@@ -24,10 +24,14 @@ export async function createCharacter(data) {
     scenario: data.scenario || '',
     systemPrompt: data.systemPrompt || '',
     firstMessage: data.firstMessage || '',
+    alternateGreetings: Array.isArray(data.alternateGreetings) ? data.alternateGreetings.filter(Boolean) : [],
     avatarEmoji: data.avatarEmoji || '',
     avatarImage: data.avatarImage || null,   // 壓縮後的 dataURL 頭像
     knownPersonaId: data.knownPersonaId || state.defaultPersonaId || null, // 他認識的那個「你」
     proactivity: data.proactivity || 'mid', // 主動程度:off 不主動 | low | mid | high
+    noPhone: !!data.noPhone,               // 非現代世界角色:不發社群/不主動傳訊/不看動態
+    emojiStyle: data.emojiStyle || '',     // emoji 習慣(自由文字,如「只用🐟,像個大叔」)
+    relationships: data.relationships || {}, // 與其他角色的關係:{對方id: 描述}(群聊/正文雙方在場時注入)
     themeColor: data.themeColor || '#8ea7ff',
     createdAt: now,
   };
@@ -204,12 +208,15 @@ export async function ensureRoomInitialized(roomId) {
   if (room.type === 'dm') {
     if (msgs.length === 0) {
       const character = getRoomCharacters(room)[0];
-      if (character && character.firstMessage && character.firstMessage.trim()) {
+      // 多開場白:firstMessage + alternateGreetings 隨機挑一
+      const greetings = [character?.firstMessage, ...(character?.alternateGreetings || [])]
+        .map((g) => String(g || '').trim()).filter(Boolean);
+      if (character && greetings.length) {
         msgs.push({
           id: genId('msg'),
           role: 'character',
           senderId: character.id,
-          content: character.firstMessage.trim(),
+          content: greetings[Math.floor(Math.random() * greetings.length)],
           createdAt: Date.now(),
         });
         changed = true;
@@ -299,4 +306,27 @@ export async function goPhoneView(view) {
   state.phoneView = view;
   if (view !== 'chat-room' && view !== 'story-room') state.currentRoomId = null;
   await persist();
+}
+
+/* ------------------------------------------------------------
+ * 場景/群聊成員中途加入與移出
+ * ------------------------------------------------------------ */
+
+export async function addRoomMember(roomId, characterId) {
+  const room = getRoom(roomId);
+  const c = getCharacter(characterId);
+  if (!room || !c || room.type === 'dm') return null;
+  if (!room.participantIds.includes(characterId)) room.participantIds.push(characterId);
+  await persist();
+  return room;
+}
+
+export async function removeRoomMember(roomId, characterId) {
+  const room = getRoom(roomId);
+  if (!room || room.type === 'dm') return null;
+  const chars = room.participantIds.filter((id) => id !== 'player');
+  if (chars.length <= 1) throw new Error('至少要留一位角色在場');
+  room.participantIds = room.participantIds.filter((id) => id !== characterId);
+  await persist();
+  return room;
 }

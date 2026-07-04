@@ -22,6 +22,8 @@ import { hashStr, pick, echoOf, traitOf, sceneOf } from './chat.js';
 import { getApiConfig, generateReply, parseGroupReplies, stripNamePrefix } from './api.js';
 import { matchEntries } from './worldbook.js';
 import { getPersona, defaultPersona, circleOfPost } from './persona.js';
+import { sharedMemoriesFor } from './memory.js';
+import { globalPromptSection, fmtMsgTime } from './prompt.js';
 
 /* ---------------- 基本資料操作 ---------------- */
 
@@ -254,17 +256,18 @@ export function buildSocialPrompt({ post, triggerText, replyToName = null, rng =
   const state = getState();
   const circle = circleOfPost(post, getCharacter);
   // 方案一:只有「認識這個人設」的角色會出面
-  const chars = state.characters.filter((c) => (c.knownPersonaId || state.defaultPersonaId) === circle);
+  const chars = state.characters.filter((c) => (c.knownPersonaId || state.defaultPersonaId) === circle && !c.noPhone);
   const persona = getPersona(circle) || defaultPersona();
   const cap = state.apiConfig?.maxReplyChars?.group ?? 1200;
 
   const profiles = chars.map((c) => [
     `- ${c.name}:${c.description || '(無描述)'}`,
     `  個性:${c.personality || '(未提供)'}`,
+    c.emojiStyle?.trim() ? `  Emoji 習慣:${c.emojiStyle.trim()}` : '',
     c.scenario ? `  情境:${c.scenario}` : '',
   ].filter(Boolean).join('\n')).join('\n');
 
-  const shared = (state.memories?.shared || [])
+  const shared = sharedMemoriesFor(circle)
     .map((m) => `- ${m.content}`).join('\n') || '(無)';
 
   const comments = getComments(post.id).slice(-8)
@@ -291,6 +294,7 @@ export function buildSocialPrompt({ post, triggerText, replyToName = null, rng =
     : (getCharacter(post.authorId)?.name || '?');
 
   const system = [
+    ...globalPromptSection(),
     '你要扮演一個公開社群動態底下留言的多位角色。這是公開版面,角色只知道公開資訊。',
     `【角色公開資料】\n${profiles}`,
     `【玩家(這個圈子認識的)】${persona?.name || '(未命名玩家)'}:${persona?.description || '(未提供)'}`,
@@ -299,6 +303,7 @@ export function buildSocialPrompt({ post, triggerText, replyToName = null, rng =
     `【貼文】${authorName}:${post.content}`,
     `【既有留言】\n${comments}`,
     ...(replyToName ? [`【剛剛的留言是指名回覆「${replyToName}」的:他應該優先出面回應;其他角色可補充也可以不出聲。`] : []),
+    `【現在時間】現在是 ${fmtMsgTime(Date.now())}。`,
     '【輸出格式】只輸出 JSON 陣列,不要其他文字:[{"name":"角色名","content":"留言"}]。'
       + `0 到 3 則;像真實社群一樣,不必每個角色都留言,可以只有一人回或沒人回;`
       + `留言是社群口吻,單則不超過 ${cap} 字,不要加名字前綴。`
@@ -324,7 +329,7 @@ export function buildSocialPrompt({ post, triggerText, replyToName = null, rng =
 export async function generateSocialReplies({ post, triggerText, triggerPersonaId = null, replyToName = null }) {
   const state = getState();
   const circle = circleOfPost(post, getCharacter);
-  const circleChars = state.characters.filter((c) => (c.knownPersonaId || state.defaultPersonaId) === circle);
+  const circleChars = state.characters.filter((c) => (c.knownPersonaId || state.defaultPersonaId) === circle && !c.noPhone);
 
   // 方案一:留言的人設若不屬於這個圈子,圈內角色不認識他,選擇無視
   const trigger = triggerPersonaId || state.activePersonaId || state.defaultPersonaId;
@@ -380,7 +385,7 @@ function dmRoomIdOf(characterId) {
  */
 export function buildAutoPostPrompt(character, rng = Math.random) {
   const state = getState();
-  const shared = (state.memories?.shared || []).map((m) => `- ${m.content}`).join('\n') || '(無)';
+  const shared = sharedMemoriesFor(character.knownPersonaId || state.defaultPersonaId).map((m) => `- ${m.content}`).join('\n') || '(無)';
   const recentPosts = getPosts().slice(0, 5)
     .map((p) => `- ${p.authorId === 'player' ? (getPersona(p.personaId)?.name || '玩家') : (getCharacter(p.authorId)?.name || '?')}:${p.content.slice(0, 40)}`)
     .join('\n') || '(無)';
@@ -401,8 +406,9 @@ export function buildAutoPostPrompt(character, rng = Math.random) {
 
   const cap = state.apiConfig?.maxReplyChars?.group ?? 1200;
   const system = [
+    ...globalPromptSection(),
     `你是「${character.name}」,正要在公開社群發一篇貼文。`,
-    `【你的公開資料】${character.description || '(無)'};個性:${character.personality || '(未提供)'}${character.scenario ? `;情境:${character.scenario}` : ''}`,
+    `【你的公開資料】${character.description || '(無)'};個性:${character.personality || '(未提供)'}${character.scenario ? `;情境:${character.scenario}` : ''}${character.emojiStyle?.trim() ? `;Emoji 習慣:${character.emojiStyle.trim()}` : ''}`,
     `【共享記憶(公開)】\n${shared}`,
     `【世界書】\n${loreText}`,
     `【最近的社群動態】\n${recentPosts}`,
@@ -410,6 +416,7 @@ export function buildAutoPostPrompt(character, rng = Math.random) {
       ? `【你和玩家最近的私訊(只有你自己知道,別人看不到)】\n${dmLines}\n`
         + '貼文可以受這些對話的心情或話題啟發,但這是公開版面——像真人一樣含蓄,不要把私訊內容原文貼出來或全盤托出。'
       : '',
+    `【現在時間】現在是 ${fmtMsgTime(Date.now())}。`,
     `【輸出】只輸出貼文內容本身,口吻像真人發社群動態,不要加名字前綴、不要 JSON、不要引號包裹。${rollLengthDirective('post', rng)}`,
   ].filter(Boolean).join('\n\n');
 
@@ -436,7 +443,7 @@ export async function refreshFeed(opts = {}) {
   state.socialLastRefresh = Date.now();
   await persist();
 
-  const chars = state.characters;
+  const chars = state.characters.filter((c) => !c.noPhone);
   if (!chars.length) return { ok: true, posted: 0 };
 
   // 0~2 位:25% 沒人發、50% 一位、25% 兩位(受角色數限制)

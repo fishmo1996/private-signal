@@ -77,12 +77,14 @@ export function parentView() {
     case 'people-character': return 'people';
     case 'worldbook-detail': return 'worldbook';
     case 'character-diary': return 'people-character';
+    case 'search': return 'chat-friends';
     case 'chat-friends':
     case 'chat-rooms':
     case 'social-feed':
     case 'story-list':
     case 'people':
     case 'player':
+    case 'album':
     case 'settings':
     case 'worldbook':
       return 'home';

@@ -10,6 +10,9 @@ import { getState, genId, persist, getCharacter, getRoomMessages } from './state
 import { getApiConfig, generateReply, stripNamePrefix } from './api.js';
 import { getPersona, defaultPersona } from './persona.js';
 import { matchEntries } from './worldbook.js';
+import { sharedMemoriesFor } from './memory.js';
+import { albumTextFor } from './album.js';
+import { globalPromptSection } from './prompt.js';
 import { rollLengthDirective } from './social.js';
 import { hashStr, pick, traitOf, sceneOf } from './chat.js';
 
@@ -64,7 +67,7 @@ export function buildDiaryPrompt(character, rng = Math.random) {
 
   const myPrivate = (state.memories.byCharacterId[character.id] || [])
     .map((m) => `- ${m.pinned ? '(重要)' : ''}${m.content}`).join('\n') || '(無)';
-  const shared = (state.memories.shared || []).map((m) => `- ${m.content}`).join('\n') || '(無)';
+  const shared = sharedMemoriesFor(character.knownPersonaId || state.defaultPersonaId).map((m) => `- ${m.content}`).join('\n') || '(無)';
 
   const lore = matchEntries({ characterId: character.id, recentText: context });
   const loreText = lore.length
@@ -72,11 +75,13 @@ export function buildDiaryPrompt(character, rng = Math.random) {
     : '(無)';
 
   const system = [
+    ...globalPromptSection(),
     `你是「${character.name}」,正在寫只給自己看的日記。`,
     `【你的資料】${character.description || '(無)'};個性:${character.personality || '(未提供)'}${character.scenario ? `;情境:${character.scenario}` : ''}`,
     `【你最近經歷的對話】\n${context}`,
     `【最近的社群動態】\n${posts}`,
     `【你記得的事】\n${myPrivate}`,
+    ...(albumTextFor(character.id) ? [`【相簿裡的回憶】\n${albumTextFor(character.id)}`] : []),
     `【大家都知道的事】\n${shared}`,
     `【世界觀】\n${loreText}`,
     `【寫作指令】第一人稱,寫給自己看——可以坦白你對「${persona?.name || '那個人'}」的真實想法,包括嘴上不會說的。`

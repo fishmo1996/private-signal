@@ -15,8 +15,10 @@ import {
   findDmRoom, openRoom,
 } from './rooms.js';
 import { sendUserMessage, isRoomBusy, editMessage, deleteMessage, regenerateLastReply, refreshChats } from './chat.js';
+import { addRoomMember, removeRoomMember } from './rooms.js';
 import {
   createMemoryCandidate, addMemory, editMemory, togglePin, deleteMemory,
+  generateSummaryCandidates, commitSummary,
 } from './memory.js';
 import {
   getPosts, getPost, getComments, createPost, addComment, toggleLike,
@@ -26,18 +28,28 @@ import {
 import {
   initNavigation, isLocked, unlock, getView, navigate, back, parentView,
 } from './navigation.js';
-import { buildLockScreenHTML, buildHomeHTML, clockString } from './home.js';
+import { buildLockScreenHTML, buildHomeHTML, clockString, HOME_APPS, DOCK_APPS } from './home.js';
 import { compressAvatar, compressBackground, compressPhoto } from './image.js';
 import { getDiaries, generateDiary, deleteDiary } from './diary.js';
+import { getPhotos, addPhoto, updatePhoto, deletePhoto } from './album.js';
+import { searchAll } from './search.js';
+import { messagesSinceSummary } from './memory.js';
+import {
+  ttsAvailable, listChineseVoices, toggleSpeak, speakingMessageKey,
+  setVoiceStateListener, estimateSeconds, setCharacterVoice,
+} from './voice.js';
+import { exportRoomJson, parseRoomImport, importRoom } from './roombackup.js';
+import { exportCharacterPack, exportCharacterCardV2, parseCharacterImport, importCharacter } from './charcard.js';
 import { exportStateJson, importStateJson } from './state.js';
 import {
   getPersonas, getPersona, defaultPersona, personaForRoom,
   createPersona, updatePersona, deletePersona, syncPlayerMirror,
 } from './persona.js';
-import { buildPrompt } from './prompt.js';
+import { buildPrompt, buildGroupPrompt, buildStoryPrompt } from './prompt.js';
 import {
   getWorldbooks, getWorldbook, createWorldbook, updateWorldbook, deleteWorldbook,
   addEntry, updateEntry, deleteEntry, parseKeywords,
+  exportWorldbookJson, exportAllWorldbooksJson, parseWorldbookImport, importWorldbooks,
 } from './worldbook.js';
 import {
   PROVIDERS, getApiConfig, saveApiConfig, savePreset, loadPreset,
@@ -169,9 +181,19 @@ function bindBack(root = els.phoneScreen) {
 export function applyTheme() {
   const theme = getState().settings.theme || 'dusk';
   document.body.classList.toggle('theme-sage', theme === 'sage');
+  document.body.classList.toggle('theme-berry', theme === 'berry');
+  const fs = getState()?.settings?.fontScale || 'normal';
+  document.body.classList.remove('font-sm', 'font-lg', 'font-xl');
+  if (fs === 'small') document.body.classList.add('font-sm');
+  if (fs === 'large') document.body.classList.add('font-lg');
+  if (fs === 'xlarge') document.body.classList.add('font-xl');
 }
 
 export function initUI() {
+  setVoiceStateListener(() => {
+    const v = getView();
+    if (v === 'chat-room' || v === 'story-room') renderMessages();
+  });
   applyTheme();
   els.phone = document.getElementById('phone');
   els.phoneScreen = document.getElementById('phoneScreen');
@@ -231,6 +253,8 @@ function renderPhone() {
     case 'story-room': renderRoomView(); break;
     case 'people': renderPeople(); break;
     case 'player': renderPlayer(); break;
+    case 'album': renderAlbum(); break;
+    case 'search': renderSearch(); break;
     case 'people-character': renderCharacterDetail(); break;
     case 'character-diary': renderCharacterDiary(); break;
     case 'settings': renderSettings(); break;
@@ -311,7 +335,8 @@ function renderChatApp(tab) {
   const state = getState();
 
   const rightHtml = tab === 'friends'
-    ? '<button class="header-action" id="btnChatRefresh">↻</button>'
+    ? '<button class="header-action" id="btnGlobalSearch">🔍</button>'
+      + '<button class="header-action" id="btnChatRefresh">↻</button>'
       + '<button class="header-action" id="btnHeaderAdd">＋ 新增角色</button>'
     : '<button class="header-action" id="btnHeaderAdd">＋ 建立聊天室</button>';
 
@@ -341,6 +366,10 @@ function renderChatApp(tab) {
     if (tab === 'friends') openCharacterModal({ openDmAfter: true });
     else openGroupModal();
   });
+  const searchBtn = els.phoneScreen.querySelector('#btnGlobalSearch');
+  if (searchBtn) {
+    searchBtn.addEventListener('click', async () => { await navigate('search'); renderAll(); });
+  }
   const chatRefresh = els.phoneScreen.querySelector('#btnChatRefresh');
   if (chatRefresh) {
     chatRefresh.addEventListener('click', async () => {
@@ -452,12 +481,18 @@ function renderRoomView() {
     ${appHeader(room.title, {
       subtitle: statusText,
       leadingHtml: isStory ? '<span class="avatar sm neutral" aria-hidden="true">❖</span>' : avatarHtml(chars[0], 'sm'),
-      rightHtml: (room.type === 'dm' ? '<button class="header-action" id="btnRoomDiary">日記</button>' : '')
-        + `<button class="header-action" id="btnRoomMemory">記憶</button>`
+      rightHtml: (room.type === 'dm' ? '<button class="header-action" id="btnRoomDiary">日記</button>'
+        : (room.type === 'group' ? '<button class="header-action" id="btnSelfChat">↻</button>' : '')
+          + '<button class="header-action" id="btnRoomMembers">成員</button>')
+        + `<button class="header-action" id="btnRoomMemory">記憶${messagesSinceSummary(room.id).length >= 30 ? '<span class="unread-dot" aria-label="建議摘要"></span>' : ''}</button>`
         + `<button class="header-action" id="btnAuthorNote">備註${room.authorNote?.trim() ? '●' : ''}</button>`
         + (deletable ? '<button class="icon-btn" id="btnDeleteRoom" aria-label="刪除">✕</button>' : ''),
     })}
     <div class="messages ${isStory ? 'story-mode' : ''}" id="messages" aria-live="polite"></div>
+    ${(getState().settings.quickReplies || []).length ? `
+      <div class="quick-replies">
+        ${getState().settings.quickReplies.map((q, i) => `<button class="mini-btn" data-quick="${i}">${esc(q)}</button>`).join('')}
+      </div>` : ''}
     <div class="attach-preview" id="attachPreview" hidden>
       <img id="attachImg" alt="待傳送的圖片">
       <button class="mini-btn danger" id="btnAttachClear">移除</button>
@@ -477,6 +512,24 @@ function renderRoomView() {
   bindBack();
   els.phoneScreen.querySelector('#btnAuthorNote').addEventListener('click', () => openAuthorNoteModal(room));
   els.phoneScreen.querySelector('#btnRoomMemory').addEventListener('click', () => openRoomMemoryModal(room));
+  const selfChatBtn = els.phoneScreen.querySelector('#btnSelfChat');
+  if (selfChatBtn) {
+    selfChatBtn.addEventListener('click', async () => {
+      selfChatBtn.disabled = true;
+      const r = await selfChat(room.id, (info) => {
+        typingBy = info.typingBy ?? typingBy;
+        if (getState().currentRoomId === room.id) renderMessages();
+      });
+      typingBy = '';
+      if (getState().currentRoomId !== room.id) return;
+      renderMessages();
+      if (!r.ok && r.message) alert(r.message);
+      const btn2 = els.phoneScreen.querySelector('#btnSelfChat');
+      if (btn2) btn2.disabled = false;
+    });
+  }
+  const membersBtn = els.phoneScreen.querySelector('#btnRoomMembers');
+  if (membersBtn) membersBtn.addEventListener('click', () => openRoomMembersModal(room));
   const diaryBtn = els.phoneScreen.querySelector('#btnRoomDiary');
   if (diaryBtn) {
     diaryBtn.addEventListener('click', async () => {
@@ -559,6 +612,37 @@ function renderRoomView() {
   };
 
   sendBtn.addEventListener('click', doSend);
+  els.phoneScreen.querySelectorAll('[data-choice]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const last = getRoomMessages(room.id).slice(-1)[0];
+      const choice = last?.choices?.[Number(btn.dataset.choice)];
+      if (!choice) return;
+      input.value = choice;
+      doSend();
+    });
+  });
+  const charVoiceOf = (m2) => {
+    const ch = m2.senderId !== 'player' && m2.senderId !== 'system' ? getCharacter(m2.senderId) : null;
+    return ch?.voice || {};
+  };
+  els.phoneScreen.querySelectorAll('[data-speak]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const m2 = getRoomMessages(room.id).find((x) => x.id === btn.dataset.speak);
+      if (m2) toggleSpeak(m2.id, m2.content, charVoiceOf(m2));
+    });
+  });
+  els.phoneScreen.querySelectorAll('[data-speak-note]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const m2 = getRoomMessages(room.id).find((x) => x.id === el.dataset.speakNote);
+      if (m2) toggleSpeak(m2.id, m2.content, charVoiceOf(m2));
+    });
+  });
+  els.phoneScreen.querySelectorAll('[data-quick]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      input.value = getState().settings.quickReplies[Number(btn.dataset.quick)] || '';
+      doSend();
+    });
+  });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -579,8 +663,16 @@ function renderMessages() {
   const msgs = getRoomMessages(room.id);
   const showTime = state.settings.showTimestamps !== false;
 
-  const html = msgs.map((m) => {
+  const html = msgs.map((m, i) => {
     const time = showTime ? `<span class="msg-time">${fmtTime(m.createdAt)}</span>` : '';
+    const isLast = i === msgs.length - 1;
+    const speakBtn = (m.role === 'character' || m.role === 'narrator') && ttsAvailable()
+      ? `<button class="remember-btn" data-speak="${esc(m.id)}" aria-label="朗讀">${speakingMessageKey() === m.id ? '■' : '▶'}</button>`
+      : '';
+    const choicesHtml = (isLast && m.choices?.length && room.type === 'story') ? `
+      <div class="story-choices">
+        ${m.choices.map((cc, ci) => `<button class="choice-btn" data-choice="${ci}">▷ ${esc(cc)}</button>`).join('')}
+      </div>` : '';
     const rememberBtn = `<button class="remember-btn" data-remember="${esc(m.id)}" aria-label="記住這件事">記住</button>`
       + `<button class="remember-btn" data-msg-edit="${esc(m.id)}" aria-label="編輯訊息">編輯</button>`
       + `<button class="remember-btn danger" data-msg-del="${esc(m.id)}" aria-label="刪除訊息">刪除</button>`;
@@ -592,8 +684,8 @@ function renderMessages() {
     if (m.role === 'narrator') {
       return `
         <div class="msg-narrator">
-          <div class="narrator-body">${esc(m.content).replaceAll('\n', '<br>')}</div>
-          <div class="msg-meta">${time}${rememberBtn}</div>
+          <div class="narrator-body">${esc(m.content).replaceAll('\n', '<br>')}${choicesHtml}</div>
+          <div class="msg-meta">${time}${rememberBtn}${speakBtn}</div>
         </div>`;
     }
     const imgHtml = m.image ? `<img class="msg-image" src="${m.image}" alt="訊息圖片">` : '';
@@ -607,7 +699,7 @@ function renderMessages() {
       return `
         <div class="msg-row user">
           <div class="bubble user-bubble">${shareHtml}${imgHtml}${esc(m.content).replaceAll('\n', '<br>')}</div>
-          <div class="msg-meta">${time}${rememberBtn}</div>
+          <div class="msg-meta">${time}${rememberBtn}${speakBtn}</div>
         </div>`;
     }
     const c = getCharacter(m.senderId);
@@ -617,7 +709,14 @@ function renderMessages() {
         ${avatarHtml(c, 'sm')}
         <div class="msg-col">
           ${nameLine}
-          <div class="bubble char-bubble" style="--c:${esc(c ? c.themeColor : '#6b7280')}">${imgHtml}${esc(m.content).replaceAll('\n', '<br>')}</div>
+          ${m.voice ? `
+            <div class="bubble char-bubble voice-note" style="--c:${esc(c ? c.themeColor : '#6b7280')}" data-speak-note="${esc(m.id)}">
+              <span class="voice-play">${speakingMessageKey() === m.id ? '■' : '▶'}</span>
+              <span class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+              <span class="voice-secs">${estimateSeconds(m.content)}"</span>
+            </div>
+            <div class="voice-transcript">${esc(m.content).replaceAll('\n', '<br>')}</div>${choicesHtml}`
+    : `<div class="bubble char-bubble" style="--c:${esc(c ? c.themeColor : '#6b7280')}">${imgHtml}${esc(m.content).replaceAll('\n', '<br>')}</div>${choicesHtml}`}
           <div class="msg-meta">${time}${rememberBtn}</div>
         </div>
       </div>`;
@@ -823,6 +922,7 @@ function renderSocialPost() {
         <div class="comment-body">${esc(cm.content).replaceAll('\n', '<br>')}</div>
         <button class="remember-btn" data-remember-comment="${esc(cm.id)}">記住</button>
         ${cm.authorId !== 'player' ? `<button class="remember-btn" data-reply-comment="${esc(cm.id)}">回覆</button>` : ''}
+        ${cm.authorId !== 'player' ? `<button class="remember-btn" data-dm-comment="${esc(cm.id)}">私下聊</button>` : ''}
         ${replyTargetId === cm.id ? `
           <div class="inline-reply">
             <textarea id="inlineReplyBox" rows="2" placeholder="回覆 ${esc(authorName(cm.authorId))}…"></textarea>
@@ -898,6 +998,46 @@ function renderSocialPost() {
     });
   });
 
+  els.phoneScreen.querySelectorAll('[data-dm-comment]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const cm = comments.find((x) => x.id === btn.dataset.dmComment);
+      const c = cm ? getCharacter(cm.authorId) : null;
+      const dmRoom = c ? findDmRoom(c.id) : null;
+      if (!c || !dmRoom) return;
+      const who = post.authorId === 'player'
+        ? ((getPersona(post.personaId) || defaultPersona())?.name || '你')
+        : authorName(post.authorId);
+      openModal(`
+        <h3>私下跟 ${esc(c.name)} 聊這個</h3>
+        <div class="panel-note">會把這篇貼文的引用卡帶進你們的私訊,話題從廣場拉到兩人之間。</div>
+        <label class="field">想說什麼
+          <textarea id="dmTopicMsg" rows="2" maxlength="500" placeholder="你剛剛那則留言是什麼意思?"></textarea>
+        </label>
+        <div class="form-actions"><button class="primary-btn slim" id="btnDmTopicSend">送出並前往私訊</button></div>`, {
+        onOpen(root) {
+          root.querySelector('#btnDmTopicSend').addEventListener('click', async () => {
+            const text = root.querySelector('#dmTopicMsg').value.trim();
+            if (!text) return;
+            closeModal();
+            const sharedPost = {
+              postId: post.id,
+              authorName: who,
+              excerpt: post.content.length > 60 ? `${post.content.slice(0, 60)}…` : post.content,
+              image: post.image || null,
+            };
+            await openRoom(dmRoom.id);
+            renderAll();
+            await sendUserMessage(dmRoom.id, text, (info) => {
+              typingBy = info.typingBy || '';
+              if (getState().currentRoomId === dmRoom.id) renderMessages();
+            }, null, sharedPost);
+            typingBy = '';
+            if (getState().currentRoomId === dmRoom.id) renderMessages();
+          });
+        },
+      });
+    });
+  });
   els.phoneScreen.querySelectorAll('[data-reply-comment]').forEach((btn) => {
     btn.addEventListener('click', () => {
       replyTargetId = replyTargetId === btn.dataset.replyComment ? null : btn.dataset.replyComment;
@@ -1039,6 +1179,204 @@ function renderStoryList() {
 
 /* ---------------- G. 角色與玩家 App ---------------- */
 
+/** 全域搜尋:訊息/記憶/貼文/日記。 */
+function renderSearch() {
+  els.phoneScreen.innerHTML = `
+    ${appHeader('搜尋')}
+    <div class="phone-list">
+      <div class="composer" style="padding:0 0 10px">
+        <input id="searchBox" placeholder="搜尋訊息、記憶、貼文、日記…" aria-label="搜尋" autofocus>
+      </div>
+      <div id="searchResults"><div class="panel-note">「那句話他在哪裡說的?」——打幾個字就知道。</div></div>
+    </div>`;
+  bindBack();
+  const box = els.phoneScreen.querySelector('#searchBox');
+  const results = els.phoneScreen.querySelector('#searchResults');
+  let timer = null;
+  const run = () => {
+    const q = box.value.trim();
+    if (!q) { results.innerHTML = '<div class="panel-note">輸入關鍵字開始搜尋。</div>'; return; }
+    const r = searchAll(q);
+    const sec = (title, items, rowFn) => (items.length ? `
+      <div class="mem-heading">${title}(${items.length})</div>${items.map(rowFn).join('')}` : '');
+    results.innerHTML = (
+      sec('訊息', r.messages, (m) => `
+        <button class="list-row" data-jump-room="${esc(m.roomId)}">
+          <span class="list-main">
+            <span class="list-title">${esc(m.roomTitle)} · ${esc(m.who)}</span>
+            <span class="list-preview">${esc(m.snippet)}</span>
+          </span><span class="list-chevron">›</span>
+        </button>`)
+      + sec('記憶', r.memories, (m) => `
+        <div class="list-row" style="cursor:default">
+          <span class="list-main">
+            <span class="list-title">${m.pinned ? '📌 ' : ''}${esc(m.where)}</span>
+            <span class="list-preview">${esc(m.snippet)}</span>
+          </span>
+        </div>`)
+      + sec('貼文', r.posts, (p) => `
+        <button class="list-row" data-jump-post="${esc(p.postId)}">
+          <span class="list-main">
+            <span class="list-title">${esc(p.who)} 的貼文</span>
+            <span class="list-preview">${esc(p.snippet)}</span>
+          </span><span class="list-chevron">›</span>
+        </button>`)
+      + sec('日記', r.diaries, (d) => `
+        <button class="list-row" data-jump-diary="${esc(d.characterId)}">
+          <span class="list-main">
+            <span class="list-title">${esc(d.who)} 的日記</span>
+            <span class="list-preview">${esc(d.snippet)}</span>
+          </span><span class="list-chevron">›</span>
+        </button>`)
+    ) || '<div class="list-empty">找不到。換個關鍵字?</div>';
+    results.querySelectorAll('[data-jump-room]').forEach((b) => b.addEventListener('click', async () => {
+      await openRoom(b.dataset.jumpRoom); renderAll();
+    }));
+    results.querySelectorAll('[data-jump-post]').forEach((b) => b.addEventListener('click', async () => {
+      await navigate('social-post', { postId: b.dataset.jumpPost }); renderAll();
+    }));
+    results.querySelectorAll('[data-jump-diary]').forEach((b) => b.addEventListener('click', async () => {
+      await navigate('character-diary', { characterId: b.dataset.jumpDiary }); renderAll();
+    }));
+  };
+  box.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 200); });
+}
+
+/** 回憶相簿:照片只在本機;進 prompt 的是描述文字,分享時才給模型看圖。 */
+function renderAlbum() {
+  const state = getState();
+  const photos = getPhotos();
+  els.phoneScreen.innerHTML = `
+    ${appHeader('相簿', { rightHtml: '<button class="header-action" id="btnAddPhoto">＋ 新增回憶</button>' })}
+    <input type="file" id="photoFile" accept="image/*" hidden>
+    <div class="phone-list">
+      <div class="panel-note" style="margin:0 2px 10px">照片只存在這台裝置;被標註在場的角色會「記得」描述文字,聊天中可分享照片給他看。</div>
+      ${photos.length ? `<div class="album-grid">
+        ${photos.map((p) => `
+          <button class="album-cell" data-open-photo="${esc(p.id)}" aria-label="檢視回憶">
+            <img src="${p.image}" alt="">
+            <span class="album-caption">${esc(p.caption || '(未命名)')}</span>
+          </button>`).join('')}
+      </div>` : '<div class="list-empty">還沒有回憶。跑完一場好劇情,幫它留一張照片吧。</div>'}
+    </div>`;
+  bindBack();
+
+  const photoFile = els.phoneScreen.querySelector('#photoFile');
+  els.phoneScreen.querySelector('#btnAddPhoto').addEventListener('click', () => photoFile.click());
+  photoFile.addEventListener('change', async () => {
+    const file = photoFile.files[0];
+    photoFile.value = '';
+    if (!file) return;
+    try {
+      const image = await compressPhoto(file);
+      openPhotoModal(null, image);
+    } catch { alert('圖片讀取失敗'); }
+  });
+  els.phoneScreen.querySelectorAll('[data-open-photo]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const p = getPhotos().find((x) => x.id === btn.dataset.openPhoto);
+      if (p) openPhotoModal(p, p.image);
+    });
+  });
+}
+
+/** 新增/編輯一張回憶(photo=null 為新增)。 */
+function openPhotoModal(photo, image) {
+  const state = getState();
+  openModal(`
+    <h3>${photo ? '這段回憶' : '新增回憶'}</h3>
+    <img class="album-full" src="${image}" alt="回憶照片">
+    <form id="photoForm">
+      <label class="field">回憶描述(角色會記得這句話)
+        <input name="caption" maxlength="60" required value="${esc(photo?.caption || '')}" placeholder="例:八月,和子勳在海邊看日落">
+      </label>
+      <label class="field">日期(自由填,可留空)
+        <input name="dateText" maxlength="20" value="${esc(photo?.dateText || '')}" placeholder="2026/8/12 或「八月的某天」">
+      </label>
+      <div class="field-label">在場角色(勾選的人才會記得):</div>
+      <div class="check-list">
+        ${state.characters.map((c) => `
+          <label class="check-field">
+            <input type="checkbox" name="pc" value="${esc(c.id)}" ${photo?.characterIds?.includes(c.id) ? 'checked' : ''}> ${esc(c.name)}
+          </label>`).join('') || '<div class="panel-empty small">尚無角色</div>'}
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="primary-btn slim">${photo ? '儲存' : '存入相簿'}</button>
+        ${photo ? '<button type="button" class="ghost-btn slim" id="btnSharePhoto">分享到聊天</button>' : ''}
+        ${photo ? '<button type="button" class="danger-btn slim" id="btnDelPhoto">刪除</button>' : ''}
+      </div>
+    </form>`, {
+    onOpen(root) {
+      root.querySelector('#photoForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const data = {
+          caption: String(fd.get('caption')),
+          dateText: String(fd.get('dateText') || ''),
+          characterIds: [...root.querySelectorAll('input[name="pc"]:checked')].map((i) => i.value),
+        };
+        if (photo) await updatePhoto(photo.id, data);
+        else await addPhoto({ ...data, image });
+        closeModal();
+        renderPhone();
+      });
+      const del = root.querySelector('#btnDelPhoto');
+      if (del) {
+        del.addEventListener('click', async () => {
+          await deletePhoto(photo.id);
+          closeModal();
+          renderPhone();
+        });
+      }
+      const share = root.querySelector('#btnSharePhoto');
+      if (share) {
+        share.addEventListener('click', () => {
+          closeModal();
+          openSharePhotoModal(photo);
+        });
+      }
+    },
+  });
+}
+
+/** 分享回憶照片到聊天:走一般傳圖流程,那一輪模型會真的看到圖。 */
+function openSharePhotoModal(photo) {
+  const state = getState();
+  const rooms = state.rooms.filter((r) => r.type === 'dm' || r.type === 'group');
+  if (!rooms.length) { openModal('<h3>分享照片</h3><p class="panel-note">還沒有可分享的聊天。</p>'); return; }
+  openModal(`
+    <h3>分享回憶照片</h3>
+    <img class="album-full" src="${photo.image}" alt="">
+    <label class="field">附一句話(可留空)
+      <input id="photoMsg" maxlength="500" placeholder="還記得這天嗎" value="${esc(photo.caption || '')}">
+    </label>
+    <div class="field-label">傳到哪裡?</div>
+    <div class="check-list">
+      ${rooms.map((r) => `
+        <button class="list-row" data-photo-room="${esc(r.id)}">
+          <span class="avatar sm neutral" aria-hidden="true">${r.type === 'group' ? '◍' : '◖◗'}</span>
+          <span class="list-main"><span class="list-title">${esc(r.title)}</span></span>
+        </button>`).join('')}
+    </div>`, {
+    onOpen(root) {
+      root.querySelectorAll('[data-photo-room]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const text = root.querySelector('#photoMsg').value;
+          closeModal();
+          await openRoom(btn.dataset.photoRoom);
+          renderAll();
+          await sendUserMessage(btn.dataset.photoRoom, text, (info) => {
+            typingBy = info.typingBy || '';
+            if (getState().currentRoomId === btn.dataset.photoRoom) renderMessages();
+          }, photo.image);
+          typingBy = '';
+          if (getState().currentRoomId === btn.dataset.photoRoom) renderMessages();
+        });
+      });
+    },
+  });
+}
+
 /** 玩家 App:人設管理(多個「你」)。 */
 function renderPlayer() {
   const state = getState();
@@ -1077,7 +1415,8 @@ function renderPeople() {
     </button>`).join('');
 
   els.phoneScreen.innerHTML = `
-    ${appHeader('聯絡人')}
+    ${appHeader('聯絡人', { rightHtml: '<button class="header-action" id="btnImportCard">匯入角色卡</button>' })}
+    <input type="file" id="cardFile" accept=".json,.png,.charx,application/json,image/png" hidden>
     <div class="phone-list people">
 
       <div class="people-heading">
@@ -1096,6 +1435,31 @@ function renderPeople() {
       renderAll();
     });
   });
+
+  // 匯入角色卡(本站包 / Character Card V2/V3 JSON / PNG 圖卡)
+  const cardFile = els.phoneScreen.querySelector('#cardFile');
+  els.phoneScreen.querySelector('#btnImportCard').addEventListener('click', () => cardFile.click());
+  cardFile.addEventListener('change', async () => {
+    const file = cardFile.files[0];
+    cardFile.value = '';
+    if (!file) return;
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let pngDataUrl = null;
+      if (file.type === 'image/png' || file.name.toLowerCase().endsWith('.png')) {
+        pngDataUrl = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res(r.result);
+          r.onerror = () => rej(new Error('圖片讀取失敗'));
+          r.readAsDataURL(file);
+        });
+      }
+      const card = await parseCharacterImport(bytes, { pngDataUrl });
+      openCardPreviewModal(card);
+    } catch (err) {
+      alert(`匯入失敗:${err.message}(目前資料未被更動)`);
+    }
+  });
 }
 
 function renderCharacterDetail() {
@@ -1107,11 +1471,19 @@ function renderCharacterDetail() {
     ${appHeader(c.name, {
       subtitle: '角色資料',
       leadingHtml: avatarHtml(c, 'sm'),
-      rightHtml: '<button class="header-action" id="btnCharDiary">日記</button>',
+      rightHtml: '<button class="header-action" id="btnCharExport">匯出</button>'
+        + '<button class="header-action" id="btnCharDiary">日記</button>',
     })}
     <div class="phone-list profile-detail">
       <form id="charEditForm">
         ${characterFormFields(c)}
+        ${getState().characters.filter((o) => o.id !== c.id).length ? `
+          <div class="field-label">與其他角色的關係(留空=不提;只在雙方同場的群聊/正文注入)</div>
+          ${getState().characters.filter((o) => o.id !== c.id).map((o) => `
+            <label class="field">${esc(c.name)} 對 ${esc(o.name)}
+              <input name="rel_${esc(o.id)}" maxlength="80" value="${esc(c.relationships?.[o.id] || '')}" placeholder="例:互看不順眼但默契絕佳的隊友">
+            </label>`).join('')}
+        ` : ''}
         <div class="form-actions">
           <button type="submit" class="primary-btn slim">儲存變更</button>
           <button type="button" class="ghost-btn slim" id="btnOpenDm">開啟私訊</button>
@@ -1124,6 +1496,16 @@ function renderCharacterDetail() {
 
   bindCharCounters(els.phoneScreen);
   const getAvatar = bindAvatarUpload(els.phoneScreen, c.avatarImage);
+  const voiceTest = els.phoneScreen.querySelector('[data-voice-test]');
+  if (voiceTest) {
+    voiceTest.addEventListener('click', () => {
+      const f = els.phoneScreen.querySelector('#charEditForm');
+      toggleSpeak(`test_${c.id}`, `嗨,我是${c.name}。還記得海邊那天嗎?`, {
+        voiceURI: f.voiceURI.value, rate: f.vrate.value, pitch: f.vpitch.value,
+      });
+    });
+  }
+  els.phoneScreen.querySelector('#btnCharExport').addEventListener('click', () => openCardExportModal(c));
   els.phoneScreen.querySelector('#btnCharDiary').addEventListener('click', async () => {
     await navigate('character-diary', { characterId: c.id });
     renderAll();
@@ -1131,6 +1513,21 @@ function renderCharacterDetail() {
   els.phoneScreen.querySelector('#charEditForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const data = readForm(e.target);
+    data.noPhone = data.noPhone === 'on';
+    data.alternateGreetings = String(data.alternateGreetings || '').split('\n').map((g) => g.trim()).filter(Boolean);
+    const relationships = {};
+    for (const [k, v] of Object.entries(data)) {
+      if (k.startsWith('rel_')) {
+        const rid = k.slice(4);
+        if (String(v).trim()) relationships[rid] = String(v).trim();
+        delete data[k];
+      }
+    }
+    data.relationships = relationships;
+    if (data.voiceURI !== undefined) {
+      await setCharacterVoice(c.id, { voiceURI: data.voiceURI, rate: data.vrate, pitch: data.vpitch });
+      delete data.voiceURI; delete data.vrate; delete data.vpitch;
+    }
     const av = getAvatar();
     if (av !== undefined) data.avatarImage = av;
     await updateCharacter(c.id, data);
@@ -1276,7 +1673,17 @@ function apiSectionHtml() {
           <input id="apiThink" type="number" min="0" step="1" value="${esc(String(cfg.thinkingBudget ?? ''))}" placeholder="留空=預設">
         </label>
       </div>
-      <div class="panel-note">溫度:創作建議 0.9~1.2。思考預算(Gemini 2.5+):0=關閉思考最省額度;留空用模型預設;數字越大推理越深但更貴更慢。</div>
+      <label class="field">上下文預算(字;對話歷史由新到舊裝進 prompt,裝滿即止——正文自動少帶幾則、短訊自動多帶)
+        <input id="apiBudget" type="number" min="2000" step="1000" value="${cfg.contextBudget || 20000}">
+      </label>
+      <label class="field">內容安全等級(僅 Gemini;對映官方 safetySettings 參數)
+        <select id="apiSafety" class="theme-select" style="width:100%; margin-top:5px">
+          <option value="default" ${cfg.safetyLevel !== 'relaxed' && cfg.safetyLevel !== 'none' ? 'selected' : ''}>預設(Google 標準過濾)</option>
+          <option value="relaxed" ${cfg.safetyLevel === 'relaxed' ? 'selected' : ''}>寬鬆(只擋高風險)</option>
+          <option value="none" ${cfg.safetyLevel === 'none' ? 'selected' : ''}>最寬(BLOCK_NONE,成人請自行負責)</option>
+        </select>
+      </label>
+      <div class="panel-note">溫度:創作建議 0.9~1.2。思考預算(Gemini 2.5+):0=關閉思考最省額度;留空用模型預設;數字越大推理越深但更貴更慢。內容被安全層擋下時,錯誤訊息會顯示「模型回傳了空內容」。</div>
       <div class="form-actions">
         <button class="ghost-btn slim" id="btnApiTest">測試連線</button>
         <button class="ghost-btn slim" id="btnApiModels">取得模型列表</button>
@@ -1303,6 +1710,8 @@ function readApiForm() {
     temperature: Math.min(2, Math.max(0, Number(g('#apiTemp').value))),
     topP: Math.min(1, Math.max(0, Number(g('#apiTopP').value))),
     thinkingBudget: g('#apiThink').value.trim() === '' ? '' : Math.max(0, Number(g('#apiThink').value)),
+    safetyLevel: g('#apiSafety').value,
+    contextBudget: Math.max(2000, Number(g('#apiBudget').value) || 20000),
   };
 }
 
@@ -1352,6 +1761,72 @@ function bindApiSection() {
     await savePreset(Number(b.dataset.presetSave));
     renderPhone();
   }));
+}
+
+/* ---------------- 角色卡匯入預覽 / 匯出 ---------------- */
+
+function openCardPreviewModal(card) {
+  const bookCount = (card.worldbooks || []).reduce((n, b) => n + b.entries.length, 0);
+  openModal(`
+    <h3>匯入角色卡</h3>
+    <div class="list-row" style="pointer-events:none">
+      ${card.avatarImage ? `<span class="avatar img"><img src="${card.avatarImage}" alt=""></span>` : `<span class="avatar" style="--c:${esc(card.themeColor)}">${esc(card.avatarEmoji || card.name.slice(0, 1))}</span>`}
+      <span class="list-main">
+        <span class="list-title">${esc(card.name)}</span>
+        <span class="list-preview">${esc(card.sourceFormat)} · 頭像:${card.avatarImage ? '有' : '無'} · 世界書條目:${bookCount}</span>
+      </span>
+    </div>
+    <div class="panel-note" style="margin-top:8px">
+      描述:${esc((card.description || '(無)').slice(0, 80))}${(card.description || '').length > 80 ? '…' : ''}<br>
+      第一則訊息:${esc((card.firstMessage || '(無)').slice(0, 50))}${(card.firstMessage || '').length > 50 ? '…' : ''}
+    </div>
+    <div class="panel-note">將以「建立新角色」方式匯入(附新私訊,不覆蓋任何既有角色)。${bookCount ? '內嵌世界書會建立為新書並綁定此角色。' : ''}</div>
+    <div class="form-actions">
+      <button class="primary-btn slim" id="btnCardConfirm">確認匯入</button>
+      <button class="ghost-btn slim" id="btnCardCancel">取消</button>
+    </div>`, {
+    onOpen(root) {
+      root.querySelector('#btnCardCancel').addEventListener('click', closeModal);
+      root.querySelector('#btnCardConfirm').addEventListener('click', async () => {
+        const { character } = await importCharacter(card);
+        closeModal();
+        await navigate('people-character', { characterId: character.id });
+        renderAll();
+      });
+    },
+  });
+}
+
+function downloadJson(text, filename) {
+  const blob = new Blob([text], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function openCardExportModal(c) {
+  const d = new Date();
+  const date = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  openModal(`
+    <h3>匯出「${esc(c.name)}」</h3>
+    <p class="panel-note">兩種格式都不含 API 金鑰、聊天紀錄與私密記憶。綁定這個角色的世界書會一併打包。</p>
+    <div class="form-actions" style="flex-direction:column; align-items:stretch">
+      <button class="primary-btn slim" id="btnExpPack">匯出完整角色包(本站格式,含頭像/主題色)</button>
+      <button class="ghost-btn slim" id="btnExpV2">匯出通用角色卡 JSON(Character Card V2 相容)</button>
+    </div>`, {
+    onOpen(root) {
+      root.querySelector('#btnExpPack').addEventListener('click', () => {
+        downloadJson(exportCharacterPack(c), `${c.name}-pack-${date}.json`);
+        closeModal();
+      });
+      root.querySelector('#btnExpV2').addEventListener('click', () => {
+        downloadJson(exportCharacterCardV2(c), `${c.name}-v2-${date}.json`);
+        closeModal();
+      });
+    },
+  });
 }
 
 /* ---------------- 角色日記 ---------------- */
@@ -1430,7 +1905,12 @@ function renderWorldbookList() {
   }).join('');
 
   els.phoneScreen.innerHTML = `
-    ${appHeader('世界書', { rightHtml: '<button class="header-action" id="btnNewBook">＋ 新增世界書</button>' })}
+    ${appHeader('世界書', {
+      rightHtml: '<button class="header-action" id="btnImportWb">匯入</button>'
+        + '<button class="header-action" id="btnExportAllWb">匯出全部</button>'
+        + '<button class="header-action" id="btnNewBook">＋ 新增世界書</button>',
+    })}
+    <input type="file" id="wbFile" accept=".json,application/json" hidden>
     <div class="phone-list">
       ${rows || `
         <div class="list-empty">
@@ -1459,6 +1939,38 @@ function renderWorldbookList() {
     },
   });
   els.phoneScreen.querySelector('#btnNewBook').addEventListener('click', openCreate);
+
+  const wbDate = () => {
+    const d = new Date();
+    return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  };
+  els.phoneScreen.querySelector('#btnExportAllWb').addEventListener('click', () => {
+    if (!getWorldbooks().length) { alert('目前沒有世界書可匯出'); return; }
+    downloadJson(exportAllWorldbooksJson(), `worldbooks-all-${wbDate()}.json`);
+  });
+  const wbFile = els.phoneScreen.querySelector('#wbFile');
+  els.phoneScreen.querySelector('#btnImportWb').addEventListener('click', () => wbFile.click());
+  wbFile.addEventListener('change', async () => {
+    const file = wbFile.files[0];
+    wbFile.value = '';
+    if (!file) return;
+    try {
+      const books = parseWorldbookImport(await file.text());
+      const total = books.reduce((n, b) => n + b.entries.length, 0);
+      const kwCount = books.reduce((n, b) => n + b.entries.reduce((m, e) => m + e.keywords.length, 0), 0);
+      openConfirmModal({
+        title: `匯入 ${books.length} 本世界書?`,
+        body: `${books.map((b) => `「${b.name}」`).join('、')},共 ${total} 個條目、${kwCount} 個觸發關鍵字。將建立為新書(全域生效,可再改綁定),不會覆蓋任何既有世界書。`,
+        confirmLabel: '匯入',
+        onConfirm: async () => {
+          await importWorldbooks(books);
+          renderPhone();
+        },
+      });
+    } catch (err) {
+      alert(`匯入失敗:${err.message}(目前資料未被更動)`);
+    }
+  });
   const emptyBtn = els.phoneScreen.querySelector('#btnEmptyBook');
   if (emptyBtn) emptyBtn.addEventListener('click', openCreate);
   els.phoneScreen.querySelectorAll('[data-open-book]').forEach((btn) => {
@@ -1474,6 +1986,14 @@ function renderWorldbookDetail() {
   const book = state.currentWorldbookId ? getWorldbook(state.currentWorldbookId) : null;
   if (!book) { navigate('worldbook').then(renderAll); return; }
 
+  const roomChecks = state.rooms.map((r) => `
+    <label class="check-field">
+      <input type="checkbox" name="bindRoom" value="${esc(r.id)}"
+        ${(book.scope?.roomIds || []).includes(r.id) ? 'checked' : ''}
+        ${book.scope?.global ? 'disabled' : ''}>
+      ${r.type === 'dm' ? '私訊' : r.type === 'group' ? '群聊' : '正文'}:${esc(r.title)}
+    </label>`).join('');
+
   const charChecks = state.characters.map((c) => `
     <label class="check-field">
       <input type="checkbox" name="bindChar" value="${esc(c.id)}"
@@ -1486,7 +2006,7 @@ function renderWorldbookDetail() {
     <div class="wb-entry ${e.enabled ? '' : 'off'}">
       <div class="wb-entry-head">
         <span class="wb-entry-title">${e.alwaysOn ? '📌 ' : ''}${esc(e.title)}</span>
-        <span class="wb-entry-keys">${e.alwaysOn ? '常駐' : esc((e.keywords || []).join('、') || '(無關鍵字)')}</span>
+        <span class="wb-entry-keys">${e.alwaysOn ? '常駐' : esc((e.keywords || []).join('、') || '(無關鍵字)')} · 權重 ${e.priority ?? 100}</span>
       </div>
       <div class="wb-entry-content">${esc(e.content)}</div>
       <div class="mem-actions">
@@ -1499,7 +2019,8 @@ function renderWorldbookDetail() {
   els.phoneScreen.innerHTML = `
     ${appHeader(book.name, {
       subtitle: '世界書',
-      rightHtml: '<button class="header-action" id="btnNewEntry">＋ 新增條目</button>',
+      rightHtml: '<button class="header-action" id="btnExportWb">匯出</button>'
+        + '<button class="header-action" id="btnNewEntry">＋ 新增條目</button>',
     })}
     <div class="phone-list profile-detail">
       <form id="wbMetaForm">
@@ -1514,6 +2035,8 @@ function renderWorldbookDetail() {
         </label>
         <div class="field-label">或只綁定特定角色:</div>
         <div class="check-list">${charChecks || '<div class="panel-empty small">尚無角色</div>'}</div>
+        <div class="field-label">或綁定特定聊天室(該對話中生效,適合場景專用設定):</div>
+        <div class="check-list">${roomChecks || '<div class="panel-empty small">尚無聊天室</div>'}</div>
         <div class="form-actions">
           <button type="submit" class="primary-btn slim">儲存設定</button>
           <button type="button" class="danger-btn slim" id="btnDelBook">刪除世界書</button>
@@ -1528,7 +2051,7 @@ function renderWorldbookDetail() {
   // 全域勾選時,即時停用角色勾選框
   const metaForm = els.phoneScreen.querySelector('#wbMetaForm');
   metaForm.querySelector('input[name="global"]').addEventListener('change', (e) => {
-    metaForm.querySelectorAll('input[name="bindChar"]').forEach((cb) => { cb.disabled = e.target.checked; });
+    metaForm.querySelectorAll('input[name="bindChar"], input[name="bindRoom"]').forEach((cb) => { cb.disabled = e.target.checked; });
   });
 
   metaForm.addEventListener('submit', async (e) => {
@@ -1540,6 +2063,7 @@ function renderWorldbookDetail() {
       scope: {
         global: !!fd.get('global'),
         characterIds: [...e.target.querySelectorAll('input[name="bindChar"]:checked')].map((i) => i.value),
+        roomIds: [...e.target.querySelectorAll('input[name="bindRoom"]:checked')].map((i) => i.value),
       },
     });
     renderAll();
@@ -1558,6 +2082,11 @@ function renderWorldbookDetail() {
     });
   });
 
+  els.phoneScreen.querySelector('#btnExportWb').addEventListener('click', () => {
+    const d = new Date();
+    const date = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    downloadJson(exportWorldbookJson(book.id), `${book.name}-worldbook-${date}.json`);
+  });
   els.phoneScreen.querySelector('#btnNewEntry').addEventListener('click', () => openEntryModal(book.id));
   els.phoneScreen.querySelectorAll('[data-entry-edit]').forEach((b) => b.addEventListener('click', () => {
     const entry = book.entries.find((e) => e.id === b.dataset.entryEdit);
@@ -1592,6 +2121,9 @@ function openEntryModal(bookId, entry = null) {
       <label class="check-field">
         <input type="checkbox" name="alwaysOn" ${entry?.alwaysOn ? 'checked' : ''}> 常駐(不需關鍵字,永遠進入 prompt,較耗 token)
       </label>
+      <label class="field">權重(同時觸發搶位子時,數字大的優先;預設 100)
+        <input name="priority" type="number" step="10" value="${entry?.priority ?? 100}">
+      </label>
       <div class="form-actions"><button type="submit" class="primary-btn slim">${entry ? '儲存' : '新增'}</button></div>
     </form>`, {
     onOpen(root) {
@@ -1604,6 +2136,7 @@ function openEntryModal(bookId, entry = null) {
           keywords: parseKeywords(fd.get('keywords')),
           content: fd.get('content'),
           alwaysOn: !!fd.get('alwaysOn'),
+          priority: Number(fd.get('priority')),
         };
         if (entry) await updateEntry(bookId, entry.id, data);
         else await addEntry(bookId, data);
@@ -1629,6 +2162,7 @@ function renderSettings() {
         <select id="selTheme" class="theme-select">
           <option value="dusk" ${state.settings.theme !== 'sage' ? 'selected' : ''}>暮霧(深色)</option>
           <option value="sage" ${state.settings.theme === 'sage' ? 'selected' : ''}>青霧(淺綠護眼)</option>
+          <option value="berry" ${state.settings.theme === 'berry' ? 'selected' : ''}>甜莓(粉嫩,配可愛圖示包)</option>
         </select>
       </label>
       <div class="setting-row">
@@ -1641,6 +2175,13 @@ function renderSettings() {
       </div>
 
       <div class="people-heading">顯示</div>
+      <label class="setting-row">
+        <span class="setting-label">字體大小<br><span class="setting-hint">調大一點,眼睛不那麼累</span></span>
+        <select id="selFontScale" class="theme-select">
+          ${[['small', '小'], ['normal', '標準'], ['large', '大'], ['xlarge', '特大']]
+            .map(([v, l]) => `<option value="${v}" ${(state.settings.fontScale || 'normal') === v ? 'selected' : ''}>${l}</option>`).join('')}
+        </select>
+      </label>
       <label class="setting-row">
         <span class="setting-label">訊息顯示時間</span>
         <input type="checkbox" id="chkTimestamps" ${state.settings.showTimestamps !== false ? 'checked' : ''}>
@@ -1655,18 +2196,80 @@ function renderSettings() {
         <input type="checkbox" id="chkResume" ${state.settings.resumeLastRoom === true ? 'checked' : ''}>
       </label>
 
+      <div class="people-heading">提示詞</div>
+      <label class="field" style="padding:0 2px">全域提示詞(所有對話與模式都套用,位於 prompt 最開頭)
+        <textarea id="globalPromptBox" rows="3" maxlength="2000" data-counter placeholder="例如:所有角色使用台灣用語;禁止替玩家角色代言或決定其行動">${esc(state.settings.globalPrompt || '')}</textarea>
+        <span class="char-count"></span>
+      </label>
+      <div class="form-actions"><button class="ghost-btn slim" id="btnSaveGlobalPrompt">儲存全域提示詞</button></div>
+
+      <div class="field-label">風格模組(勾選即生效於所有對話;想漫才就開、不想就關)</div>
+      ${state.settings.styleModules.map((m) => `
+        <div class="preset-row">
+          <input type="checkbox" data-sm-toggle="${esc(m.id)}" ${m.enabled ? 'checked' : ''} aria-label="啟用 ${esc(m.name)}">
+          <span class="preset-info" title="${esc(m.content)}">${esc(m.name)}</span>
+          <button class="mini-btn" data-sm-edit="${esc(m.id)}">編輯</button>
+          <button class="mini-btn danger" data-sm-del="${esc(m.id)}">刪除</button>
+        </div>`).join('')}
+      <div class="form-actions"><button class="ghost-btn slim" id="btnNewStyleModule">＋ 新增風格模組</button></div>
+
+      <label class="field" style="padding:0 2px">快速回覆按鈕(每行一個;顯示在對話輸入框上方,點了直接送出)
+        <textarea id="quickRepliesBox" rows="2" maxlength="500">${esc((state.settings.quickReplies || []).join('\n'))}</textarea>
+      </label>
+      <div class="form-actions"><button class="ghost-btn slim" id="btnSaveQuickReplies">儲存快速回覆</button></div>
+
+      <div class="field-label">輸出替換規則(對所有 AI 輸出做「找→換」,例如把 *動作* 星號體換成(動作))</div>
+      ${state.settings.outputRules.map((r) => `
+        <div class="preset-row">
+          <input type="checkbox" data-or-toggle="${esc(r.id)}" ${r.enabled ? 'checked' : ''} aria-label="啟用規則">
+          <span class="preset-info">${r.regex ? '[regex] ' : ''}${esc(r.find)} → ${esc(r.replace || '(刪除)')}</span>
+          <button class="mini-btn danger" data-or-del="${esc(r.id)}">刪除</button>
+        </div>`).join('')}
+      <div class="form-actions"><button class="ghost-btn slim" id="btnNewOutputRule">＋ 新增規則</button></div>
+
       <div class="people-heading">正文</div>
       <label class="field" style="padding:0 2px">格式指令(套用於所有正文場景;單一場景可用「備註」覆寫)
         <textarea id="storyFormatBox" rows="3" maxlength="1000" data-counter>${esc(state.settings.storyFormat || '')}</textarea>
         <span class="char-count"></span>
       </label>
       <div class="form-actions"><button class="ghost-btn slim" id="btnSaveStoryFormat">儲存格式指令</button></div>
+      <div class="field-label" style="margin-top:8px">App 圖示包(每格丟一張方形圖即換皮;沒圖的維持預設字符)</div>
+      <div class="icon-pack-grid">
+        ${[...HOME_APPS, ...DOCK_APPS].map((app) => {
+    const cur = state.settings.appIcons?.[app.id];
+    return `
+          <div class="icon-slot">
+            <button class="icon-slot-preview ${cur ? 'has-img' : ''}" data-icon-up="${esc(app.id)}" aria-label="上傳 ${esc(app.label)} 圖示">
+              ${cur ? `<img src="${cur}" alt="">` : `<span>${app.glyph}</span>`}
+            </button>
+            <span class="icon-slot-label">${esc(app.label)}</span>
+            ${cur ? `<button class="mini-btn danger" data-icon-clear="${esc(app.id)}">清除</button>` : ''}
+          </div>`;
+  }).join('')}
+      </div>
+      <div class="form-actions"><button class="ghost-btn slim" id="btnClearAllIcons">全部還原預設圖示</button></div>
+      <input type="file" id="iconFile" accept="image/*" hidden>
+
+      <label class="setting-row">
+        <span class="setting-label">主畫面角色狀態卡<br><span class="setting-hint">時鐘下方那張「誰在線上」的小卡</span></span>
+        <input type="checkbox" id="chkStatusCard" ${state.settings.showStatusCard !== false ? 'checked' : ''}>
+      </label>
+      <label class="setting-row">
+        <span class="setting-label">角色會傳語音訊息<br><span class="setting-hint">情緒濃的時刻,他自己決定改用「說的」(聲波條樣式,點了播放;僅支援語音的裝置)</span></span>
+        <input type="checkbox" id="chkVoiceTag" ${state.settings.voiceTag !== false ? 'checked' : ''}>
+      </label>
+      <label class="setting-row">
+        <span class="setting-label">正文行動選項<br><span class="setting-hint">說書人結尾給 2~3 個 ▷ 選項按鈕,可點可無視</span></span>
+        <input type="checkbox" id="chkStoryChoices" ${state.settings.storyChoices !== false ? 'checked' : ''}>
+      </label>
 
       <div class="people-heading">AI 連線(API / LLM)</div>
       <div class="panel-note">金鑰只存在這台電腦的瀏覽器裡。目前對話仍使用本機假回覆;這裡先把連線設定準備好,串接時即可直接使用。</div>
       ${apiSectionHtml()}
 
       <div class="people-heading">資料</div>
+      <button class="ghost-btn slim" id="btnImportRoom">匯入聊天室備份</button>
+      <input type="file" id="roomFile" accept=".json,application/json" hidden>
       <div class="panel-note">所有資料只存在這台電腦的瀏覽器(IndexedDB)裡,不會傳到任何地方。建議定期匯出備份,避免清瀏覽器快取時遺失。<br><strong>備份不包含 API 金鑰;匯入到新裝置後請自行重新輸入。</strong></div>
       <div class="form-actions">
         <button class="primary-btn slim" id="btnExport">匯出全域備份</button>
@@ -1689,6 +2292,34 @@ function renderSettings() {
     state.settings.showTimestamps = e.target.checked;
     await persist();
   });
+  const roomFile = els.phoneScreen.querySelector('#roomFile');
+  els.phoneScreen.querySelector('#btnImportRoom').addEventListener('click', () => roomFile.click());
+  roomFile.addEventListener('change', async () => {
+    const file = roomFile.files[0];
+    roomFile.value = '';
+    if (!file) return;
+    try {
+      const parsed = parseRoomImport(await file.text());
+      openConfirmModal({
+        title: `匯入「${parsed.room.title}」?`,
+        body: `${parsed.room.type === 'dm' ? '私訊' : parsed.room.type === 'group' ? '群聊' : '正文場景'},${parsed.participants.length} 位角色、${parsed.messages.length} 則訊息。將建立為新副本,不會覆蓋任何既有資料;同名角色${parsed.room.type === 'dm' ? '會另建「(匯入)」新角色' : '將直接沿用'}。`,
+        confirmLabel: '匯入',
+        onConfirm: async () => {
+          const { room } = await importRoom(parsed);
+          const { openRoom } = await import('./rooms.js');
+          await openRoom(room.id);
+          renderAll();
+        },
+      });
+    } catch (err) {
+      alert(`匯入失敗:${err.message}(目前資料未被更動)`);
+    }
+  });
+  els.phoneScreen.querySelector('#selFontScale').addEventListener('change', async (e) => {
+    state.settings.fontScale = e.target.value;
+    await persist();
+    renderAll();
+  });
   els.phoneScreen.querySelector('#chkLockScreen').addEventListener('change', async (e) => {
     state.settings.showLockScreen = e.target.checked;
     await persist();
@@ -1699,6 +2330,146 @@ function renderSettings() {
   });
   bindApiSection();
   bindCharCounters(els.phoneScreen);
+  els.phoneScreen.querySelectorAll('[data-sm-toggle]').forEach((cb) => cb.addEventListener('change', async () => {
+    const m = state.settings.styleModules.find((x) => x.id === cb.dataset.smToggle);
+    if (m) { m.enabled = cb.checked; await persist(); }
+  }));
+  els.phoneScreen.querySelectorAll('[data-sm-del]').forEach((b2) => b2.addEventListener('click', async () => {
+    state.settings.styleModules = state.settings.styleModules.filter((x) => x.id !== b2.dataset.smDel);
+    await persist();
+    renderPhone();
+  }));
+  const openStyleModal = (mod = null) => openModal(`
+    <h3>${mod ? '編輯' : '新增'}風格模組</h3>
+    <form id="smForm">
+      <label class="field">名稱
+        <input name="name" required maxlength="30" value="${esc(mod?.name || '')}" placeholder="例如:漫才模式">
+      </label>
+      <label class="field">指令內容(啟用時注入所有對話的 prompt 開頭)
+        <textarea name="content" rows="4" maxlength="2000" data-counter required>${esc(mod?.content || '')}</textarea>
+        <span class="char-count"></span>
+      </label>
+      <div class="form-actions"><button type="submit" class="primary-btn slim">${mod ? '儲存' : '建立'}</button></div>
+    </form>`, {
+    onOpen(root) {
+      bindCharCounters(root);
+      root.querySelector('#smForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        if (mod) {
+          mod.name = String(fd.get('name')).trim() || mod.name;
+          mod.content = String(fd.get('content')).trim();
+        } else {
+          state.settings.styleModules.push({
+            id: `sm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+            name: String(fd.get('name')).trim() || '未命名模組',
+            content: String(fd.get('content')).trim(),
+            enabled: true,
+          });
+        }
+        await persist();
+        closeModal();
+        renderPhone();
+      });
+    },
+  });
+  els.phoneScreen.querySelector('#btnNewStyleModule').addEventListener('click', () => openStyleModal());
+  els.phoneScreen.querySelectorAll('[data-sm-edit]').forEach((b2) => b2.addEventListener('click', () => {
+    openStyleModal(state.settings.styleModules.find((x) => x.id === b2.dataset.smEdit));
+  }));
+
+  els.phoneScreen.querySelector('#btnSaveQuickReplies').addEventListener('click', async () => {
+    state.settings.quickReplies = els.phoneScreen.querySelector('#quickRepliesBox').value
+      .split('\n').map((q) => q.trim()).filter(Boolean).slice(0, 8);
+    await persist();
+    renderPhone();
+  });
+  els.phoneScreen.querySelectorAll('[data-or-toggle]').forEach((cb) => cb.addEventListener('change', async () => {
+    const r = state.settings.outputRules.find((x) => x.id === cb.dataset.orToggle);
+    if (r) { r.enabled = cb.checked; await persist(); }
+  }));
+  els.phoneScreen.querySelectorAll('[data-or-del]').forEach((b2) => b2.addEventListener('click', async () => {
+    state.settings.outputRules = state.settings.outputRules.filter((x) => x.id !== b2.dataset.orDel);
+    await persist();
+    renderPhone();
+  }));
+  els.phoneScreen.querySelector('#btnNewOutputRule').addEventListener('click', () => openModal(`
+    <h3>新增輸出替換規則</h3>
+    <form id="orForm">
+      <label class="field">找什麼<input name="find" required maxlength="200" placeholder="例如:*"></label>
+      <label class="field">換成什麼(留空=刪除)<input name="replace" maxlength="200" placeholder="例如:(留空即移除)"></label>
+      <label class="check-field"><input type="checkbox" name="regex"> 以正則表達式解讀(進階)</label>
+      <div class="form-actions"><button type="submit" class="primary-btn slim">建立</button></div>
+    </form>`, {
+    onOpen(root) {
+      root.querySelector('#orForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        state.settings.outputRules.push({
+          id: `or_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+          find: String(fd.get('find')),
+          replace: String(fd.get('replace') || ''),
+          regex: !!fd.get('regex'),
+          enabled: true,
+        });
+        await persist();
+        closeModal();
+        renderPhone();
+      });
+    },
+  }));
+
+  els.phoneScreen.querySelector('#btnSaveGlobalPrompt').addEventListener('click', async () => {
+    state.settings.globalPrompt = els.phoneScreen.querySelector('#globalPromptBox').value.trim();
+    await persist();
+    renderPhone();
+  });
+  const iconFile = els.phoneScreen.querySelector('#iconFile');
+  let pendingIconId = null;
+  els.phoneScreen.querySelectorAll('[data-icon-up]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      pendingIconId = btn.dataset.iconUp;
+      iconFile.click();
+    });
+  });
+  iconFile.addEventListener('change', async () => {
+    const file = iconFile.files[0];
+    iconFile.value = '';
+    if (!file || !pendingIconId) return;
+    try {
+      const dataUrl = await compressAvatar(file, 128);
+      state.settings.appIcons[pendingIconId] = dataUrl;
+      await persist();
+      renderPhone();
+    } catch {
+      alert('圖片讀取失敗,換一張試試');
+    }
+  });
+  els.phoneScreen.querySelectorAll('[data-icon-clear]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      delete state.settings.appIcons[btn.dataset.iconClear];
+      await persist();
+      renderPhone();
+    });
+  });
+  els.phoneScreen.querySelector('#btnClearAllIcons').addEventListener('click', async () => {
+    state.settings.appIcons = {};
+    await persist();
+    renderPhone();
+  });
+  els.phoneScreen.querySelector('#chkStatusCard').addEventListener('change', async (e) => {
+    state.settings.showStatusCard = e.target.checked;
+    await persist();
+    renderAll();
+  });
+  els.phoneScreen.querySelector('#chkVoiceTag').addEventListener('change', async (e) => {
+    state.settings.voiceTag = e.target.checked;
+    await persist();
+  });
+  els.phoneScreen.querySelector('#chkStoryChoices').addEventListener('change', async (e) => {
+    state.settings.storyChoices = e.target.checked;
+    await persist();
+  });
   els.phoneScreen.querySelector('#btnSaveStoryFormat').addEventListener('click', async () => {
     state.settings.storyFormat = els.phoneScreen.querySelector('#storyFormatBox').value.trim();
     await persist();
@@ -1955,6 +2726,30 @@ function characterFormFields(c = {}) {
       <textarea name="firstMessage" rows="2" maxlength="2000" data-counter placeholder="第一次打開私訊時,角色說的話">${esc(c.firstMessage || '')}</textarea>
       <span class="char-count"></span>
     </label>
+    <label class="field">備用開場白(每行一句;開新私訊時與第一則訊息隨機挑一)
+      <textarea name="alternateGreetings" rows="2" maxlength="4000" data-counter>${esc((c.alternateGreetings || []).join('\n'))}</textarea>
+      <span class="char-count"></span>
+    </label>
+    <label class="field">Emoji 習慣(留空=看模型心情;例:「幾乎不用,用了代表事情大條」「愛用 😂 和 ~」)
+      <input name="emojiStyle" maxlength="100" value="${esc(c.emojiStyle || '')}">
+    </label>
+    ${ttsAvailable() ? `
+    <div class="field-label">語音(朗讀這個角色的訊息時用)</div>
+    <label class="field">聲音
+      <select name="voiceURI" class="theme-select" style="width:100%; margin-top:5px">
+        <option value="">(裝置預設 zh-TW)</option>
+        ${listChineseVoices().map((v) => `<option value="${esc(v.voiceURI)}" ${c.voice?.voiceURI === v.voiceURI ? 'selected' : ''}>${esc(v.name)}(${esc(v.lang)})</option>`).join('')}
+      </select>
+    </label>
+    <div class="voice-sliders">
+      <label class="field">語速 <input name="vrate" type="range" min="0.5" max="1.6" step="0.05" value="${c.voice?.rate ?? 1}"></label>
+      <label class="field">音調 <input name="vpitch" type="range" min="0.6" max="1.5" step="0.05" value="${c.voice?.pitch ?? 1}"></label>
+      <button type="button" class="mini-btn" data-voice-test>試聽</button>
+    </div>` : ''}
+    <label class="check-field">
+      <input type="checkbox" name="noPhone" ${c.noPhone ? 'checked' : ''}>
+      非現代世界角色(不使用手機:不發社群、不留言、不主動傳訊、對話中不看社群動態;日記與正文照常)
+    </label>
     <label class="field">主動程度(他多常主動傳訊給你)
       <select name="proactivity" class="theme-select" style="width:100%; margin-top:5px">
         ${[['off', '不主動(絕不主動傳訊)'], ['low', '低(高冷,偶爾才想到你)'], ['mid', '中(普通朋友的頻率)'], ['high', '高(黏人,常常想找你)']]
@@ -2011,6 +2806,8 @@ function openCharacterModal({ openDmAfter = false, stayInPeople = false } = {}) 
         e.preventDefault();
         const data = readForm(e.target);
         if (!data.name || !data.name.trim()) return;
+        data.noPhone = data.noPhone === 'on';
+        data.alternateGreetings = String(data.alternateGreetings || '').split('\n').map((g) => g.trim()).filter(Boolean);
         const av = getAvatar();
         if (av !== undefined) data.avatarImage = av;
         const { character, dmRoom } = await createCharacter(data);
@@ -2349,27 +3146,37 @@ function openRoomMemoryModal(room) {
   const chars = getRoomCharacters(room);
   const dmChar = room.type === 'dm' ? chars[0] : null;
 
-  // 這個對話可見的記憶分組
-  const groups = [];
-  if (dmChar) {
-    groups.push({
-      key: 'private', label: `${dmChar.name} 的私密記憶(僅本人可見)`,
-      list: state.memories.byCharacterId[dmChar.id] || [],
+  // 這個對話可見的記憶分組(每次重繪重算,新增的記憶即時出現)
+  const computeGroups = () => {
+    const g2 = [];
+    if (dmChar) {
+      g2.push({
+        key: 'private', label: `${dmChar.name} 的私密記憶(僅本人可見)`,
+        list: state.memories.byCharacterId[dmChar.id] || [],
+      });
+    }
+    if (room.type === 'story') {
+      g2.push({
+        key: 'room', label: '本場景記憶(僅在場角色可見)',
+        list: state.memories.byRoomId[room.id] || [],
+      });
+    }
+    g2.push({
+      key: 'shared',
+      label: '共享記憶(本圈子與全域)',
+      list: state.memories.shared.filter((m) => !m.circleId || m.circleId === (personaForRoom(room)?.id)),
     });
-  }
-  if (room.type === 'story') {
-    groups.push({
-      key: 'room', label: '本場景記憶(僅在場角色可見)',
-      list: state.memories.byRoomId[room.id] || [],
-    });
-  }
-  groups.push({ key: 'shared', label: '共享記憶(所有角色可見)', list: state.memories.shared });
+    return g2;
+  };
+  let groups = computeGroups();
 
   // 手動新增的可選範圍
+  const roomPersona = personaForRoom(room);
   const scopeOptions = [
     ...(dmChar ? [['private', `${dmChar.name} 的私密記憶`]] : []),
     ...(room.type === 'story' ? [['room', '本場景記憶']] : []),
-    ['shared', '共享記憶'],
+    ['shared', `共享記憶(${roomPersona?.name || '本'}圈子)`],
+    ['shared-global', '共享記憶(所有角色)'],
   ];
 
   let editingId = null;
@@ -2400,6 +3207,29 @@ function openRoomMemoryModal(room) {
     <div class="mem-heading">${esc(gp.label)}</div>
     ${gp.list.length ? gp.list.map(itemHtml).join('') : '<div class="panel-empty small">(無)</div>'}`).join('')
     + `
+    ${(getState().settings.styleModules || []).length ? `
+      <div class="mem-heading">風格模組(僅本對話)</div>
+      <div class="panel-note">勾選狀態只影響這個對話;其他對話跟隨設定裡的全域開關。</div>
+      ${getState().settings.styleModules.map((sm) => {
+    const ov = room.styleOverrides?.[sm.id];
+    const eff = ov === undefined ? sm.enabled : ov;
+    return `
+        <label class="check-field">
+          <input type="checkbox" data-room-sm="${esc(sm.id)}" ${eff ? 'checked' : ''}>
+          ${esc(sm.name)}${ov === undefined ? '(跟隨全域)' : '(本對話覆寫)'}
+        </label>`;
+  }).join('')}
+      <button class="mini-btn" id="rmStyleReset">還原全部跟隨全域</button>
+    ` : ''}
+    <div class="mem-heading">本聊天室備份</div>
+    <div class="panel-note">單獨打包這條故事線(訊息+場景記憶${'$'}{room.type === 'dm' ? '+這位角色的私密記憶' : ''};不含金鑰與其他對話)。匯入入口在設定 → 資料。</div>
+    <button class="ghost-btn slim" id="rmExportRoom">匯出此聊天室</button>
+    <div class="mem-heading">Prompt 檢視</div>
+    <button class="ghost-btn slim" id="rmInspect">🔍 檢視本次會送出的 prompt(含成本估算)</button>
+    <div class="mem-heading">對話摘要(長期記憶)</div>
+    <div class="panel-note">把上次摘要之後的對話濃縮成幾條記憶,勾選後存入——舊劇情就不會因為超出上下文而蒸發。</div>
+    <button class="ghost-btn slim" id="rmSummarize">✦ 摘要至今</button>
+    <div id="rmSummaryArea"></div>
     <div class="mem-heading">手動新增記憶</div>
     <textarea id="rmNewContent" rows="2" class="mem-edit" placeholder="直接寫一條你想讓角色記得的事"></textarea>
     <div class="field-row" style="align-items:center; gap:8px; margin-top:6px">
@@ -2415,7 +3245,7 @@ function openRoomMemoryModal(room) {
     <div id="rmBody">${bodyHtml()}</div>`, {
     onOpen(root) {
       const body = root.querySelector('#rmBody');
-      const rerender = () => { body.innerHTML = bodyHtml(); bind(); };
+      const rerender = () => { groups = computeGroups(); body.innerHTML = bodyHtml(); bind(); };
       const bind = () => {
         body.querySelectorAll('[data-rm-edit]').forEach((b2) => b2.addEventListener('click', () => {
           editingId = b2.dataset.rmEdit; rerender();
@@ -2434,14 +3264,70 @@ function openRoomMemoryModal(room) {
         body.querySelectorAll('[data-rm-del]').forEach((b2) => b2.addEventListener('click', async () => {
           await deleteMemory(b2.dataset.rmDel); rerender();
         }));
+        body.querySelectorAll('[data-room-sm]').forEach((cb) => cb.addEventListener('change', async () => {
+          if (!room.styleOverrides) room.styleOverrides = {};
+          room.styleOverrides[cb.dataset.roomSm] = cb.checked;
+          await persist();
+          rerender();
+        }));
+        const styleReset = body.querySelector('#rmStyleReset');
+        if (styleReset) {
+          styleReset.addEventListener('click', async () => {
+            room.styleOverrides = {};
+            await persist();
+            rerender();
+          });
+        }
+        body.querySelector('#rmExportRoom').addEventListener('click', () => {
+          const d = new Date();
+          const date = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+          downloadJson(exportRoomJson(room.id), `${room.title}-room-${date}.json`);
+        });
+        body.querySelector('#rmInspect').addEventListener('click', () => {
+          closeModal();
+          openPromptInspectModal(room);
+        });
+        body.querySelector('#rmSummarize').addEventListener('click', async () => {
+          const area = body.querySelector('#rmSummaryArea');
+          area.innerHTML = '<div class="api-status">整理中…</div>';
+          const r = await generateSummaryCandidates(room.id);
+          if (!r.ok) { area.innerHTML = `<div class="api-status err">${esc(r.message)}</div>`; return; }
+          area.innerHTML = `
+            ${r.items.map((it, i) => `
+              <label class="check-field summary-item">
+                <input type="checkbox" data-sum-check="${i}" checked>
+                <textarea class="mem-edit" rows="2" data-sum-text="${i}">${esc(it)}</textarea>
+              </label>`).join('')}
+            <button class="mini-btn" id="rmSumSave">存入勾選的 ${r.items.length} 條</button>`;
+          area.querySelector('#rmSumSave').addEventListener('click', async () => {
+            let saved = 0;
+            for (const [i] of r.items.entries()) {
+              if (!area.querySelector(`[data-sum-check="${i}"]`).checked) continue;
+              const content = area.querySelector(`[data-sum-text="${i}"]`).value.trim();
+              if (!content) continue;
+              await addMemory({
+                content,
+                visibility: dmChar ? 'private' : (room.type === 'story' ? 'room' : 'shared'),
+                characterId: dmChar ? dmChar.id : undefined,
+                circleId: dmChar || room.type === 'story' ? null : (personaForRoom(room)?.id || null),
+                sourceRoomId: room.type === 'story' ? room.id : null,
+              });
+              saved += 1;
+            }
+            await commitSummary(room.id, saved);
+            rerender();
+          });
+        });
+
         body.querySelector('#rmNewAdd').addEventListener('click', async () => {
           const content = body.querySelector('#rmNewContent').value.trim();
           if (!content) return;
           const scope = body.querySelector('#rmNewScope').value;
           await addMemory({
             content,
-            visibility: scope,
+            visibility: scope.startsWith('shared') ? 'shared' : scope,
             characterId: scope === 'private' ? dmChar.id : undefined,
+            circleId: scope === 'shared' ? (roomPersona?.id || null) : null,
             sourceRoomId: scope === 'room' ? room.id : null,
           });
           rerender();
@@ -2505,6 +3391,95 @@ function openSharePostModal(post) {
           if (getState().currentRoomId === btn.dataset.shareRoom) renderMessages();
         });
       });
+    },
+  });
+}
+
+/** Prompt 預覽與成本估算。 */
+function openPromptInspectModal(room) {
+  const chars = getRoomCharacters(room);
+  let built;
+  if (room.type === 'group') built = buildGroupPrompt({ roomId: room.id });
+  else if (room.type === 'story') built = buildStoryPrompt({ roomId: room.id });
+  else built = buildPrompt({ character: chars[0], roomId: room.id });
+
+  const histChars = built.messages.reduce((n, m) => n + (m.content?.length || 0), 0);
+  const sysChars = built.system.length;
+  const inTokens = Math.round((sysChars + histChars) * 1.5);   // 中文粗估 1 字 ≈ 1.5 token
+  const outTokens = Math.round((built.meta?.maxReplyChars || 800) * 1.5);
+  // 參考價:Flash 級 $0.30/M 輸入、$2.50/M 輸出;台幣 ×32
+  const inCost = (inTokens / 1e6) * 0.30 * 32;
+  const outCost = (outTokens / 1e6) * 2.50 * 32;
+
+  openModal(`
+    <h3>本次 Prompt 預覽</h3>
+    <div class="panel-note">
+      系統段 ${sysChars} 字 + 歷史 ${built.messages.length} 則(${histChars} 字)≈ <strong>${inTokens.toLocaleString()} tokens 輸入</strong><br>
+      粗估成本(Flash 級參考價):輸入約 NT$${inCost.toFixed(2)},輸出滿上限(${built.meta?.maxReplyChars} 字)最多約 NT$${outCost.toFixed(2)}<br>
+      <span style="opacity:.7">估算僅供參考,實際依供應商計價;思考模式會另計。</span>
+    </div>
+    <div class="field-label">系統段內容(世界書/記憶是否進場,一看便知):</div>
+    <pre class="prompt-inspect">${esc(built.system)}</pre>`);
+}
+
+/** 場景/群聊成員管理:中途加入或移出角色,可附登場/退場敘述。 */
+function openRoomMembersModal(room) {
+  const state = getState();
+  const inIds = room.participantIds.filter((id) => id !== 'player');
+  const outChars = state.characters.filter((c) => !inIds.includes(c.id));
+  const isStory = room.type === 'story';
+
+  openModal(`
+    <h3>成員(${inIds.length})</h3>
+    <div class="field-label">目前在場:</div>
+    ${inIds.map((id) => {
+    const c = getCharacter(id);
+    return c ? `
+      <div class="list-row" style="cursor:default">
+        ${avatarHtml(c, 'sm')}
+        <span class="list-main"><span class="list-title">${esc(c.name)}</span></span>
+        <button class="mini-btn danger" data-member-out="${esc(c.id)}">移出</button>
+      </div>` : '';
+  }).join('')}
+    <div class="field-label" style="margin-top:10px">加入角色:</div>
+    ${outChars.length ? outChars.map((c) => `
+      <div class="list-row" style="cursor:default">
+        ${avatarHtml(c, 'sm')}
+        <span class="list-main"><span class="list-title">${esc(c.name)}</span></span>
+        <button class="mini-btn" data-member-in="${esc(c.id)}">加入</button>
+      </div>`).join('') : '<div class="panel-empty small">所有角色都在場了</div>'}
+    <label class="check-field" style="margin-top:10px">
+      <input type="checkbox" id="memberNarr" checked> 加入/移出時插入一句${isStory ? '敘述' : '系統訊息'}(可先改再送)
+    </label>`, {
+    onOpen(root) {
+      const doChange = async (charId, joining) => {
+        const c = getCharacter(charId);
+        try {
+          if (joining) await addRoomMember(room.id, charId);
+          else await removeRoomMember(room.id, charId);
+        } catch (err) { alert(err.message); return; }
+        if (root.querySelector('#memberNarr').checked && c) {
+          const preset = joining
+            ? (isStory ? `此時,${c.name}來到了這裡。` : `${c.name} 加入了聊天室`)
+            : (isStory ? `${c.name}先行離開了。` : `${c.name} 離開了聊天室`);
+          const text = prompt(joining ? '登場敘述(可修改):' : '退場敘述(可修改):', preset);
+          if (text && text.trim()) {
+            const msgs = getState().messagesByRoom[room.id] || (getState().messagesByRoom[room.id] = []);
+            msgs.push({
+              id: `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+              role: isStory ? 'narrator' : 'system',
+              senderId: 'system',
+              content: text.trim(),
+              createdAt: Date.now(),
+            });
+            await persist();
+          }
+        }
+        closeModal();
+        renderPhone();
+      };
+      root.querySelectorAll('[data-member-in]').forEach((b) => b.addEventListener('click', () => doChange(b.dataset.memberIn, true)));
+      root.querySelectorAll('[data-member-out]').forEach((b) => b.addEventListener('click', () => doChange(b.dataset.memberOut, false)));
     },
   });
 }

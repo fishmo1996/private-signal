@@ -70,10 +70,36 @@ function migrate(s) {
     s.settings.storyFormat = '玩家輸入中,括號()內為台詞,括號外為動作與敘述。你的輸出以第三人稱小說筆法呈現,角色對話用「」引號,不要模仿玩家的括號格式。';
   }
   if (s.settings.autoPostCooldownMin === undefined) s.settings.autoPostCooldownMin = 10;
+  if (s.settings.globalPrompt === undefined) s.settings.globalPrompt = '';
+  if (!s.settings.fontScale) s.settings.fontScale = 'normal';
+  if (s.settings.showStatusCard === undefined) s.settings.showStatusCard = true;
+  if (!s.settings.appIcons || typeof s.settings.appIcons !== 'object') s.settings.appIcons = {}; // {appId: dataURL} 自訂圖示包
+  if (!Array.isArray(s.settings.quickReplies)) s.settings.quickReplies = ['繼續', '(描寫得更細一點)'];
+  if (!Array.isArray(s.settings.outputRules)) s.settings.outputRules = [];
+  if (!Array.isArray(s.settings.styleModules)) {
+    // 首次建立時附兩個範例模組(預設關閉),當作範本
+    s.settings.styleModules = [
+      { id: `sm_${Date.now().toString(36)}a`, name: '漫才模式', enabled: false,
+        content: '對話帶漫才式節奏:有人裝傻、有人吐槽,吐槽要快、狠、好笑;日常場景可以自然歪樓再拉回來。' },
+      { id: `sm_${Date.now().toString(36)}b`, name: '戀愛張力', enabled: false,
+        content: '增加曖昧與戀愛張力:多寫視線、距離、欲言又止的瞬間;推進要慢燒,情感變化要有鋪陳,不要突然告白。' },
+    ];
+  }
   if (s.socialLastRefresh === undefined) s.socialLastRefresh = 0;
   if (s.chatLastRefresh === undefined) s.chatLastRefresh = 0;
+  for (const r of s.rooms || []) {
+    if (!r.styleOverrides) r.styleOverrides = {};
+  }
+  if (s.settings.storyChoices === undefined) s.settings.storyChoices = true;
   if (s.diaryLastRefresh === undefined) s.diaryLastRefresh = 0;
+  if (s.selfChatLastRefresh === undefined) s.selfChatLastRefresh = 0;
   if (!s.diariesByCharacterId) s.diariesByCharacterId = {};
+  if (!Array.isArray(s.photos)) s.photos = [];
+  if (s.settings.voiceTag === undefined) s.settings.voiceTag = true;      // 角色自己判斷何時傳語音訊息
+  if (s.settings.ttsProvider === undefined) s.settings.ttsProvider = 'browser';
+  for (const c of s.characters || []) {
+    if (!c.voice || typeof c.voice !== 'object') c.voice = { voiceURI: '', rate: 1, pitch: 1 };
+  }
   if (s.settings.bgImage === undefined) s.settings.bgImage = null;
   if (s.player && s.player.avatarImage === undefined) s.player.avatarImage = null;
 
@@ -96,7 +122,11 @@ function migrate(s) {
   }
   for (const c of s.characters || []) {
     if (!c.knownPersonaId) c.knownPersonaId = s.defaultPersonaId;
+    if (!Array.isArray(c.alternateGreetings)) c.alternateGreetings = [];
     if (!c.proactivity) c.proactivity = 'mid';
+    if (c.noPhone === undefined) c.noPhone = false;
+    if (c.emojiStyle === undefined) c.emojiStyle = '';
+    if (!c.relationships || typeof c.relationships !== 'object') c.relationships = {};
   }
   for (const r of s.rooms || []) {
     if (!r.personaId) r.personaId = s.defaultPersonaId;
@@ -114,6 +144,12 @@ function migrate(s) {
   if (!s.socialSeededCharIds) s.socialSeededCharIds = [];
   if (s.currentPostId === undefined) s.currentPostId = null;
   if (!s.worldbooks) s.worldbooks = [];
+  for (const wb of s.worldbooks || []) {
+    if (wb.scope && !Array.isArray(wb.scope.roomIds)) wb.scope.roomIds = [];
+    for (const e of wb.entries || []) {
+      if (e.priority === undefined) e.priority = 100;
+    }
+  }
   if (s.currentWorldbookId === undefined) s.currentWorldbookId = null;
   if (s.apiConfig) {
     if (!s.apiConfig.maxReplyChars) s.apiConfig.maxReplyChars = { dm: 800, group: 1200, story: 4000 };
@@ -123,6 +159,7 @@ function migrate(s) {
     if (s.apiConfig.temperature === undefined) s.apiConfig.temperature = 1.0;
     if (s.apiConfig.topP === undefined) s.apiConfig.topP = 0.95;
     if (s.apiConfig.thinkingBudget === undefined) s.apiConfig.thinkingBudget = '';
+    if (s.apiConfig.safetyLevel === undefined) s.apiConfig.safetyLevel = 'default';
     if (!Array.isArray(s.apiConfig.modelList)) s.apiConfig.modelList = [];
   }
   if (!s.phoneView) s.phoneView = s.currentRoomId ? 'chat-room' : 'home';
@@ -141,7 +178,7 @@ function migrate(s) {
   const KNOWN_VIEWS = [
     'home', 'chat-friends', 'chat-rooms', 'chat-room', 'social-feed', 'social-post',
     'story-list', 'story-room', 'people', 'people-character', 'settings',
-    'worldbook', 'worldbook-detail', 'character-diary', 'player',
+    'worldbook', 'worldbook-detail', 'character-diary', 'player', 'album', 'search',
   ];
   if (!KNOWN_VIEWS.includes(s.phoneView)) s.phoneView = 'home';
   return s;
