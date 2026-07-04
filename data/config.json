@@ -1,0 +1,12 @@
+{
+  "appName": "私人訊號",
+  "tagline": "一支只屬於你的角色手機",
+  "defaultPlayer": {
+    "playerName": "",
+    "playerDescription": ""
+  },
+  "defaultSettings": {
+    "showTimestamps": true,
+    "defaultTheme": "mist"
+  }
+}

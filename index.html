@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>私人訊號</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div id="app" class="app panel-collapsed">
+
+    <main class="stage" aria-label="虛擬手機">
+      <div class="phone" id="phone">
+        <div class="phone-notch" aria-hidden="true"></div>
+        <div class="phone-screen" id="phoneScreen"></div>
+      </div>
+    </main>
+
+    <!-- 管理/開發輔助區:預設收合,不屬於手機本體 -->
+    <aside class="panel" id="panel" aria-label="管理輔助面板">
+      <div class="panel-tabs" id="panelTabs" role="tablist"></div>
+      <div class="panel-body" id="panelBody"></div>
+    </aside>
+
+    <button class="panel-toggle" id="panelToggle" aria-expanded="false" aria-label="開啟或收合管理輔助面板">⟨ 管理</button>
+  </div>
+
+  <div id="modalRoot"></div>
+
+  <!-- 載入守門員(非 module,一定會執行):
+       ES Modules 只要有一個檔案載入失敗(例如瀏覽器快取到新舊混雜的版本),
+       整個程式會靜默失敗、畫面全黑。這段程式會攔截錯誤並顯示指引,
+       不會動到任何 IndexedDB 資料。 -->
+  <script>
+    (function () {
+      var bootErrors = [];
+      window.addEventListener('error', function (e) {
+        var msg = e && (e.message || (e.error && e.error.message));
+        if (!msg && e && e.target && e.target.src) msg = '資源載入失敗:' + e.target.src;
+        if (msg) bootErrors.push(String(msg));
+      }, true);
+      window.addEventListener('unhandledrejection', function (e) {
+        if (e && e.reason) bootErrors.push(String(e.reason.message || e.reason));
+      });
+      setTimeout(function () {
+        var screen = document.getElementById('phoneScreen');
+        if (!screen || screen.childElementCount > 0) return; // 已正常渲染
+        var detail = bootErrors.length
+          ? '<p style="font-size:12px;word-break:break-all">' + bootErrors.slice(0, 3).join('<br>')
+              .replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</p>'
+          : '';
+        screen.innerHTML =
+          '<div class="phone-empty"><h2>畫面沒有啟動</h2>' + detail +
+          '<p>最常見原因是瀏覽器快取了新舊混雜的程式檔。' +
+          '請按 <strong>Ctrl+F5</strong>(Mac:Cmd+Shift+R)強制重新整理。</p>' +
+          '<p>你的本機資料存在 IndexedDB(private-signal-db),' +
+          '<strong>沒有被刪除或覆蓋</strong>。</p></div>';
+      }, 2500);
+    })();
+  </script>
+
+  <script type="module" src="./app.js?v=2"></script>
+</body>
+</html>

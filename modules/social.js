@@ -1,0 +1,476 @@
+/**
+ * modules/social.js
+ * 本機社群動態:貼文、留言、按讚,以及角色的 mock 留言。
+ *
+ * 資料存放(皆在 IndexedDB 的同一份 state 中,重新整理後仍存在):
+ *   state.posts               貼文陣列 [{id, authorId, content, createdAt, likes, likedByPlayer}]
+ *   state.commentsByPostId    留言 { [postId]: [{id, authorId, content, createdAt}] }
+ *   authorId 為 'player' 或角色 id。
+ *
+ * 隱私規則(嚴格遵守):
+ * 社群是「公開」空間。角色在社群的 mock 留言只能取用——
+ *   1. 角色自己的公開設定(personality / scenario / avatarEmoji)
+ *   2. 貼文與留言本身的內容
+ *   3. 共享記憶(state.memories.shared)
+ * 絕不讀取 memories.byCharacterId(DM 私密記憶)、memories.byRoomId(場景記憶)
+ * 或任何 messagesByRoom 的 DM 內容,因此私訊不可能洩漏到社群。
+ * 反向亦然:社群互動若要成為記憶,只會寫入 shared。
+ */
+
+import { getState, genId, persist, getCharacter } from './state.js';
+import { hashStr, pick, echoOf, traitOf, sceneOf } from './chat.js';
+import { getApiConfig, generateReply, parseGroupReplies, stripNamePrefix } from './api.js';
+import { matchEntries } from './worldbook.js';
+import { getPersona, defaultPersona, circleOfPost } from './persona.js';
+
+/* ---------------- 基本資料操作 ---------------- */
+
+export function getPosts() {
+  const state = getState();
+  if (!state.posts) state.posts = [];
+  return state.posts;
+}
+
+export function getPost(postId) {
+  return getPosts().find((p) => p.id === postId) || null;
+}
+
+export function getComments(postId) {
+  const state = getState();
+  if (!state.commentsByPostId) state.commentsByPostId = {};
+  if (!state.commentsByPostId[postId]) state.commentsByPostId[postId] = [];
+  return state.commentsByPostId[postId];
+}
+
+/** 建立貼文。authorId 為 'player' 或角色 id。 */
+export async function createPost(authorId, content, image = null, personaId = null) {
+  const text = String(content || '').trim();
+  if (!text && !image) return null;
+  const post = {
+    id: genId('post'),
+    authorId,
+    content: text,
+    image: image || null,
+    personaId: authorId === 'player' ? (personaId || getState().activePersonaId || getState().defaultPersonaId) : null,
+    createdAt: Date.now(),
+    likes: 0,
+    likedByPlayer: false,
+  };
+  getPosts().unshift(post); // 新貼文在最上面
+  await persist();
+  return post;
+}
+
+/** 玩家按讚/收回讚。 */
+export async function toggleLike(postId) {
+  const post = getPost(postId);
+  if (!post) return;
+  post.likedByPlayer = !post.likedByPlayer;
+  post.likes = Math.max(0, post.likes + (post.likedByPlayer ? 1 : -1));
+  await persist();
+}
+
+/** 新增留言。 */
+export async function addComment(postId, authorId, content, personaId = null, replyTo = null) {
+  const text = String(content || '').trim();
+  if (!text) return null;
+  const comment = {
+    id: genId('cmt'),
+    authorId,
+    content: text,
+    ...(replyTo ? { replyTo } : {}),   // {authorId, name}:回覆的是哪一位
+    ...(authorId === 'player'
+      ? { personaId: personaId || getState().activePersonaId || getState().defaultPersonaId }
+      : {}),
+    createdAt: Date.now(),
+  };
+  getComments(postId).push(comment);
+  await persist();
+  return comment;
+}
+
+/** 編輯貼文內容。 */
+export async function editPost(postId, content) {
+  const post = getPost(postId);
+  const text = String(content || '').trim();
+  if (!post || !text) return null;
+  post.content = text;
+  post.editedAt = Date.now();
+  await persist();
+  return post;
+}
+
+/** 刪除貼文(連同留言)。 */
+export async function deletePost(postId) {
+  const state = getState();
+  const idx = getPosts().findIndex((p) => p.id === postId);
+  if (idx !== -1) state.posts.splice(idx, 1);
+  delete state.commentsByPostId[postId];
+  if (state.currentPostId === postId) state.currentPostId = null;
+  await persist();
+}
+
+/* ---------------- 角色的預設貼文 ---------------- */
+
+/**
+ * 為還沒發過「初始貼文」的角色各產生一篇 mock 貼文,
+ * 讓社群首頁不會空空的。每個角色只 seed 一次(以 socialSeededCharIds 記錄)。
+ */
+export async function ensureSeedPosts() {
+  const state = getState();
+  if (!state.socialSeededCharIds) state.socialSeededCharIds = [];
+  let changed = false;
+
+  for (const c of state.characters) {
+    if (state.socialSeededCharIds.includes(c.id)) continue;
+    const seed = hashStr(c.id);
+    const trait = traitOf(c);
+    const scene = sceneOf(c);
+    const lines = [
+      `${scene ? `${scene}。` : ''}今天也在。${c.avatarEmoji || ''}`.trim(),
+      `開了帳號。${trait ? `雖然我是${trait}的人,` : ''}但偶爾也想在這裡留下一點什麼。`,
+      `${scene ? `最近:${scene}。` : '最近沒什麼大事。'}有事私訊,沒事按個讚。`,
+      `第一篇。不知道要寫什麼,先佔個位置。`,
+    ];
+    state.posts = state.posts || [];
+    state.posts.push({
+      id: genId('post'),
+      authorId: c.id,
+      content: pick(lines, seed),
+      createdAt: c.createdAt || Date.now(),
+      likes: seed % 4,
+      likedByPlayer: false,
+    });
+    state.socialSeededCharIds.push(c.id);
+    changed = true;
+  }
+  if (changed) {
+    state.posts.sort((a, b) => b.createdAt - a.createdAt);
+    await persist();
+  }
+  return changed;
+}
+
+/* ---------------- Mock 角色留言 ---------------- */
+
+/** 只取「公開」的共享記憶當提示;絕不碰私密與場景記憶。 */
+function sharedMemoryHint(seed) {
+  const state = getState();
+  const pool = (state.memories?.shared || []).filter((m) => m.content);
+  if (!pool.length) return '';
+  const m = pick(pool, seed);
+  return m.content.length > 20 ? m.content.slice(0, 20) + '…' : m.content;
+}
+
+/**
+ * 玩家發文或留言後,產生自然的角色留言:
+ * 一位主要回覆者 + 0~2 位補充,單次最多 3 則;不是每個角色都必定留言。
+ * 與群聊 mock 同一套機制(seed 可重現、取角色公開設定接話)。
+ *
+ * @param {object} opts
+ * @param {object} opts.post 貼文
+ * @param {string} opts.triggerText 玩家剛送出的內容(貼文或留言)
+ * @returns {Array<{characterId:string, content:string, delay:number}>}
+ */
+export function generateMockSocialReplies({ post, triggerText }) {
+  const state = getState();
+  const chars = state.characters;
+  if (!chars.length) return [];
+
+  const commentCount = getComments(post.id).length;
+  const seed = hashStr(triggerText) + commentCount * 19 + hashStr(post.id);
+  const echo = echoOf(triggerText);
+
+  // 貼文作者(若是角色)優先出面回覆自己貼文底下的動靜,其他情況輪到誰是誰。
+  const author = post.authorId !== 'player' ? getCharacter(post.authorId) : null;
+  const main = (author && (seed % 3 !== 0)) ? author : chars[seed % chars.length];
+  const mainTrait = traitOf(main);
+  const memHint = sharedMemoryHint(seed);
+
+  const mainLines = [
+    `在公開版面看到「${echo}」,還是想留個言。`,
+    `${mainTrait ? `以我這種${mainTrait}的人來說,` : ''}這篇我得回:${echo},同意一半。`,
+    `${memHint ? `這讓我想到之前大家都知道的那件事——${memHint}。` : `${echo}……你就這樣直接發出來喔。`}`,
+    `路過。看到「${echo}」,按了讚再走。`,
+    `${main.avatarEmoji || ''} 已閱。${echo}這種話放在這裡,大家可都看見了。`.trim(),
+  ];
+
+  const replies = [{
+    characterId: main.id,
+    content: pick(mainLines, seed),
+    delay: 800 + (seed % 500),
+  }];
+
+  // 0~2 位補充;不強迫每個角色出現。
+  const others = chars.filter((c) => c.id !== main.id);
+  const extraCount = Math.min(others.length, [0, 1, 0, 2, 1][(seed >> 2) % 5]);
+
+  for (let i = 0; i < extraCount; i += 1) {
+    const c = others[(seed + i * 7) % others.length];
+    if (replies.some((r) => r.characterId === c.id)) continue;
+    const extraLines = [
+      `${main.name}都留言了,那我也冒個泡。`,
+      `${c.avatarEmoji || '…'}`,
+      `+1,「${echo}」這句我先截圖了。`,
+      `在公開版面就先不多說,懂的都懂。`,
+      `${traitOf(c) ? `身為${traitOf(c)}的人,` : ''}我只說一句:看到了。`,
+    ];
+    replies.push({
+      characterId: c.id,
+      content: pick(extraLines, seed + i * 37),
+      delay: 1600 + i * 900 + (seed % 400),
+    });
+  }
+  return replies.slice(0, 3);
+}
+
+/** 擲骰決定內容長度檔位,回傳塞進 prompt 的指令。kind: post | comment | diary */
+export function rollLengthDirective(kind = 'post', rng = Math.random) {
+  const roll = rng();
+  if (kind === 'comment') {
+    if (roll < 0.35) return '這次的留言要非常短:幾個字到一句話,像「+1」「笑死」「哪間?」這種隨手回的等級。';
+    if (roll < 0.85) return '這次的留言保持普通長度:一到兩句就好。';
+    return '這次的留言可以稍微長一點:兩到四句,有點內容。';
+  }
+  if (kind === 'diary') {
+    if (roll < 0.25) return '今天只想寫一句話:一行以內,點到為止。';
+    if (roll < 0.80) return '今天寫個短篇:三到六句,想到什麼寫什麼。';
+    return '今天想多寫一點:一小段完整的心情,但不超過 300 字。';
+  }
+  // post
+  if (roll < 0.20) return '這篇是隨手發的廢文:一到兩句(10~40 字),可以沒有重點,像「熱死」「想吃冰」這種等級。';
+  if (roll < 0.80) return '這篇是普通日常文:兩到三句,輕鬆自然。';
+  return '這篇可以認真寫:一小段有起承轉合的內容,但不要超過 200 字。';
+}
+
+/* ---------------- 真實 AI 角色留言 ---------------- */
+
+/**
+ * 社群 prompt:公開空間,只含公開資訊——
+ * 所有角色的公開設定、共享記憶、世界書、貼文與留言本身。
+ * 絕不含任何角色的 DM 私密記憶或場景記憶。
+ */
+export function buildSocialPrompt({ post, triggerText, replyToName = null, rng = Math.random }) {
+  const state = getState();
+  const circle = circleOfPost(post, getCharacter);
+  // 方案一:只有「認識這個人設」的角色會出面
+  const chars = state.characters.filter((c) => (c.knownPersonaId || state.defaultPersonaId) === circle);
+  const persona = getPersona(circle) || defaultPersona();
+  const cap = state.apiConfig?.maxReplyChars?.group ?? 1200;
+
+  const profiles = chars.map((c) => [
+    `- ${c.name}:${c.description || '(無描述)'}`,
+    `  個性:${c.personality || '(未提供)'}`,
+    c.scenario ? `  情境:${c.scenario}` : '',
+  ].filter(Boolean).join('\n')).join('\n');
+
+  const shared = (state.memories?.shared || [])
+    .map((m) => `- ${m.content}`).join('\n') || '(無)';
+
+  const comments = getComments(post.id).slice(-8)
+    .map((cm) => {
+      const who = cm.authorId === 'player' ? (getPersona(cm.personaId)?.name || '玩家') : (getCharacter(cm.authorId)?.name || '?');
+      const target = cm.replyTo?.name ? `(回覆 ${cm.replyTo.name})` : '';
+      return `${who}${target}:${cm.content}`;
+    })
+    .join('\n') || '(尚無留言)';
+
+  const recentText = `${post.content}\n${triggerText}`;
+  const seen = new Set(); const lore = [];
+  for (const c of chars) {
+    for (const e of matchEntries({ characterId: c.id, recentText })) {
+      if (!seen.has(e.id)) { seen.add(e.id); lore.push(e); }
+    }
+  }
+  const loreText = lore.length
+    ? lore.map((e) => `- (${e.bookName}/${e.title}) ${e.content}`).join('\n')
+    : '(無)';
+
+  const authorName = post.authorId === 'player'
+    ? (getPersona(post.personaId)?.name || '玩家')
+    : (getCharacter(post.authorId)?.name || '?');
+
+  const system = [
+    '你要扮演一個公開社群動態底下留言的多位角色。這是公開版面,角色只知道公開資訊。',
+    `【角色公開資料】\n${profiles}`,
+    `【玩家(這個圈子認識的)】${persona?.name || '(未命名玩家)'}:${persona?.description || '(未提供)'}`,
+    `【共享記憶(公開)】\n${shared}`,
+    `【世界書】\n${loreText}`,
+    `【貼文】${authorName}:${post.content}`,
+    `【既有留言】\n${comments}`,
+    ...(replyToName ? [`【剛剛的留言是指名回覆「${replyToName}」的:他應該優先出面回應;其他角色可補充也可以不出聲。`] : []),
+    '【輸出格式】只輸出 JSON 陣列,不要其他文字:[{"name":"角色名","content":"留言"}]。'
+      + `0 到 3 則;像真實社群一樣,不必每個角色都留言,可以只有一人回或沒人回;`
+      + `留言是社群口吻,單則不超過 ${cap} 字,不要加名字前綴。`
+      + `每位角色的留言長度各自不同:有人只回幾個字,有人寫一兩句,不要每個人都寫一樣長。${rollLengthDirective('comment', rng)}`,
+  ].join('\n\n');
+
+  // 注意:messages 不可為空(Gemini 會回 400 contents is not specified)
+  const trigger = triggerText === post.content
+    ? `我剛發布了這篇貼文:${post.content}`
+    : `我剛在這篇貼文底下留言:${triggerText}`;
+
+  return {
+    system,
+    messages: [{ role: 'user', content: trigger, ...(post.image ? { image: post.image } : {}) }],
+    meta: { maxReplyChars: cap, roomType: 'social' },
+  };
+}
+
+/**
+ * 產生角色留言:開啟真實 AI 時走單次 API 呼叫,否則走既有 mock。
+ * 回傳 {ok, replies:[{characterId, content, delay}]} 或 {ok:false, message}。
+ */
+export async function generateSocialReplies({ post, triggerText, triggerPersonaId = null, replyToName = null }) {
+  const state = getState();
+  const circle = circleOfPost(post, getCharacter);
+  const circleChars = state.characters.filter((c) => (c.knownPersonaId || state.defaultPersonaId) === circle);
+
+  // 方案一:留言的人設若不屬於這個圈子,圈內角色不認識他,選擇無視
+  const trigger = triggerPersonaId || state.activePersonaId || state.defaultPersonaId;
+  if (!circleChars.length || (trigger && trigger !== circle)) {
+    return { ok: true, replies: [] };
+  }
+
+  const cfg = getApiConfig();
+  if (!(cfg.useRealApi && cfg.apiKey && cfg.model)) {
+    let mock = generateMockSocialReplies({ post, triggerText })
+      .filter((m) => circleChars.some((c) => c.id === m.characterId));
+    const named = replyToName ? circleChars.find((c) => c.name === replyToName) : null;
+    if (named) {
+      const idx = mock.findIndex((m) => m.characterId === named.id);
+      if (idx > 0) {
+        const [hit] = mock.splice(idx, 1);
+        mock.unshift(hit);
+      } else if (idx === -1) {
+        mock = [{ characterId: named.id, content: `你點我?「${triggerText.slice(0, 12)}」……收到。`, delay: 700 }, ...mock].slice(0, 3);
+      }
+    }
+    return { ok: true, replies: mock };
+  }
+  const r = await generateReply(cfg, buildSocialPrompt({ post, triggerText, replyToName }));
+  if (!r.ok) return { ok: false, message: r.message };
+  const replies = parseGroupReplies(r.text, circleChars)
+    .map((p, i) => ({ ...p, delay: 800 + i * 900 }));
+  return { ok: true, replies };
+}
+
+/* ---------------- 角色自主發文(刷新觸發) ---------------- */
+
+import { getRoomMessages } from './state.js';
+
+/** 冷卻檢查:回傳剩餘秒數(0 = 可以刷新)。 */
+export function refreshCooldownLeft() {
+  const state = getState();
+  const cooldownMs = (state.settings.autoPostCooldownMin ?? 10) * 60000;
+  return Math.max(0, Math.ceil((state.socialLastRefresh + cooldownMs - Date.now()) / 1000));
+}
+
+/** 找到角色自己的 DM room id。 */
+function dmRoomIdOf(characterId) {
+  const state = getState();
+  const room = state.rooms.find((r) => r.type === 'dm' && r.participantIds.includes(characterId));
+  return room ? room.id : null;
+}
+
+/**
+ * 單一角色的自主發文 prompt(方案 B):
+ * 除公開資訊外,「只」加入這位角色自己與玩家的 DM 最近幾句——
+ * 一次呼叫只為一位角色發文,絕不把其他角色的私訊混進來。
+ */
+export function buildAutoPostPrompt(character, rng = Math.random) {
+  const state = getState();
+  const shared = (state.memories?.shared || []).map((m) => `- ${m.content}`).join('\n') || '(無)';
+  const recentPosts = getPosts().slice(0, 5)
+    .map((p) => `- ${p.authorId === 'player' ? (getPersona(p.personaId)?.name || '玩家') : (getCharacter(p.authorId)?.name || '?')}:${p.content.slice(0, 40)}`)
+    .join('\n') || '(無)';
+
+  const knownPersona = getPersona(character.knownPersonaId) || defaultPersona();
+  const dmId = dmRoomIdOf(character.id);
+  const dmLines = dmId
+    ? getRoomMessages(dmId).slice(-6)
+      .map((m) => `${m.role === 'user' ? (knownPersona?.name || '玩家') : character.name}:${m.content}`)
+      .join('\n')
+    : '';
+
+  const recentText = `${dmLines}\n${recentPosts}`;
+  const lore = matchEntries({ characterId: character.id, recentText });
+  const loreText = lore.length
+    ? lore.map((e) => `- (${e.bookName}/${e.title}) ${e.content}`).join('\n')
+    : '(無)';
+
+  const cap = state.apiConfig?.maxReplyChars?.group ?? 1200;
+  const system = [
+    `你是「${character.name}」,正要在公開社群發一篇貼文。`,
+    `【你的公開資料】${character.description || '(無)'};個性:${character.personality || '(未提供)'}${character.scenario ? `;情境:${character.scenario}` : ''}`,
+    `【共享記憶(公開)】\n${shared}`,
+    `【世界書】\n${loreText}`,
+    `【最近的社群動態】\n${recentPosts}`,
+    dmLines
+      ? `【你和玩家最近的私訊(只有你自己知道,別人看不到)】\n${dmLines}\n`
+        + '貼文可以受這些對話的心情或話題啟發,但這是公開版面——像真人一樣含蓄,不要把私訊內容原文貼出來或全盤托出。'
+      : '',
+    `【輸出】只輸出貼文內容本身,口吻像真人發社群動態,不要加名字前綴、不要 JSON、不要引號包裹。${rollLengthDirective('post', rng)}`,
+  ].filter(Boolean).join('\n\n');
+
+  return {
+    system,
+    messages: [{ role: 'user', content: '(你打開了社群,想發點什麼)' }],
+    meta: { maxReplyChars: Math.min(400, cap), roomType: 'social-auto' },
+  };
+}
+
+/**
+ * 刷新動態:0~2 位角色各發一篇(每位一次呼叫,保持私訊隔離)。
+ * 有冷卻節流;mock 模式下也能用(走既有 seed 貼文句庫)。
+ * @param {{force?:boolean, rng?:()=>number}} [opts] force 跳過冷卻(測試用)
+ * @returns {{ok:boolean, posted:number, message?:string}}
+ */
+export async function refreshFeed(opts = {}) {
+  const state = getState();
+  const rng = opts.rng || Math.random;
+  if (!opts.force) {
+    const left = refreshCooldownLeft();
+    if (left > 0) return { ok: false, posted: 0, message: `再等 ${Math.ceil(left / 60)} 分鐘可以再刷新` };
+  }
+  state.socialLastRefresh = Date.now();
+  await persist();
+
+  const chars = state.characters;
+  if (!chars.length) return { ok: true, posted: 0 };
+
+  // 0~2 位:25% 沒人發、50% 一位、25% 兩位(受角色數限制)
+  const roll = rng();
+  const count = Math.min(chars.length, roll < 0.25 ? 0 : roll < 0.75 ? 1 : 2);
+  if (!count) return { ok: true, posted: 0 };
+
+  // 隨機挑不重複角色
+  const pool = [...chars];
+  const pickedChars = [];
+  for (let i = 0; i < count; i += 1) {
+    pickedChars.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]);
+  }
+
+  const cfg = getApiConfig();
+  let posted = 0;
+  for (const c of pickedChars) {
+    if (cfg.useRealApi && cfg.apiKey && cfg.model) {
+      const r = await generateReply(cfg, buildAutoPostPrompt(c, rng));
+      if (!r.ok) return { ok: false, posted, message: r.message };
+      const content = stripNamePrefix(r.text, [c.name]);
+      if (content) { await createPost(c.id, content); posted += 1; }
+    } else {
+      // mock:重用 seed 句庫,加上時間變化
+      const seed = hashStr(c.id) + Math.floor(Date.now() / 60000);
+      const lines = [
+        `${sceneOf(c) ? `${sceneOf(c)}。` : ''}突然想發個動態。`,
+        `${traitOf(c) ? `${traitOf(c)}的人` : '我'}也是會想曬一下日常的。`,
+        `今天沒什麼事,就是想冒個泡。${c.avatarEmoji || ''}`.trim(),
+        `路過自己的版面,留一句。`,
+      ];
+      await createPost(c.id, pick(lines, seed));
+      posted += 1;
+    }
+  }
+  return { ok: true, posted };
+}

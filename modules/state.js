@@ -1,0 +1,282 @@
+/**
+ * modules/state.js
+ * 全域狀態的建立、載入與保存。所有模組透過這裡取得同一份 state 物件。
+ */
+
+import { loadState, saveState, clearState, findLegacyState } from '../utils/indexeddb.js';
+
+let state = null;
+let config = null;
+
+/** 產生短而不易碰撞的 id。 */
+export function genId(prefix = 'id') {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** 依 config.json 建立初始 state(不建立任何預設角色)。 */
+function createInitialState(cfg) {
+  return {
+    appVersion: 1,
+    currentRoomId: null,
+    currentCharacterId: null,
+    currentView: 'dm',        // dm | group | story
+    phoneView: 'home',        // 見 modules/navigation.js 的頁面一覽
+    currentPostId: null,
+    player: {
+      playerName: (cfg.defaultPlayer && cfg.defaultPlayer.playerName) || '',
+      playerDescription: (cfg.defaultPlayer && cfg.defaultPlayer.playerDescription) || '',
+    },
+    characters: [],
+    rooms: [],
+    messagesByRoom: {},
+    worldbooks: [],           // 世界書(觸發式設定條目)
+    currentWorldbookId: null,
+    apiConfig: null,          // API/LLM 連線設定(見 modules/api.js;首次讀取時建立預設值)
+    posts: [],                // 社群貼文(獨立於 messagesByRoom)
+    commentsByPostId: {},     // 社群留言
+    socialSeededCharIds: [],  // 已產生過初始貼文的角色
+    memories: {
+      shared: [],
+      byCharacterId: {},
+      byRoomId: {},
+    },
+    settings: {
+      showLockScreen: false,  // 預設關閉:主畫面已內建大時鐘(可在設定開啟傳統鎖屏)
+      resumeLastRoom: false,   // 重新開啟時回到上次聊天室(預設關閉:一律先進主畫面)
+      ...(cfg.defaultSettings || {}),
+    },
+  };
+}
+
+/**
+ * 舊資料補欄位(非破壞性 migration):
+ * 只「新增」缺少的欄位與轉換頁面名稱,
+ * 絕不重設或刪除 characters / player / rooms / messagesByRoom / memories / currentCharacterId。
+ */
+function migrate(s) {
+  if (!s.memories) s.memories = { shared: [], byCharacterId: {}, byRoomId: {} };
+  if (!s.memories.shared) s.memories.shared = [];
+  if (!s.memories.byCharacterId) s.memories.byCharacterId = {};
+  if (!s.memories.byRoomId) s.memories.byRoomId = {};
+  if (!s.messagesByRoom) s.messagesByRoom = {};
+  if (!s.rooms) s.rooms = [];
+  if (!s.characters) s.characters = [];
+  if (!s.player) s.player = { playerName: '', playerDescription: '' };
+  if (!s.settings) s.settings = {};
+  if (s.settings.showLockScreen === undefined) s.settings.showLockScreen = false;
+  if (s.settings.resumeLastRoom === undefined) s.settings.resumeLastRoom = false;
+  if (!s.settings.theme) s.settings.theme = 'dusk';        // dusk 暮霧深色 | sage 青霧淺綠
+  if (s.settings.storyFormat === undefined) {
+    s.settings.storyFormat = '玩家輸入中,括號()內為台詞,括號外為動作與敘述。你的輸出以第三人稱小說筆法呈現,角色對話用「」引號,不要模仿玩家的括號格式。';
+  }
+  if (s.settings.autoPostCooldownMin === undefined) s.settings.autoPostCooldownMin = 10;
+  if (s.socialLastRefresh === undefined) s.socialLastRefresh = 0;
+  if (s.chatLastRefresh === undefined) s.chatLastRefresh = 0;
+  if (s.diaryLastRefresh === undefined) s.diaryLastRefresh = 0;
+  if (!s.diariesByCharacterId) s.diariesByCharacterId = {};
+  if (s.settings.bgImage === undefined) s.settings.bgImage = null;
+  if (s.player && s.player.avatarImage === undefined) s.player.avatarImage = null;
+
+  // 多人設:從舊的 player 資料建立預設人設(只做一次,非破壞性)
+  if (!Array.isArray(s.personas)) s.personas = [];
+  if (!s.personas.length) {
+    s.personas.push({
+      id: `psn_default_${Date.now().toString(36)}`,
+      name: s.player?.playerName || '玩家',
+      description: s.player?.playerDescription || '',
+      avatarImage: s.player?.avatarImage || null,
+      createdAt: Date.now(),
+    });
+  }
+  if (!s.defaultPersonaId || !s.personas.some((p) => p.id === s.defaultPersonaId)) {
+    s.defaultPersonaId = s.personas[0].id;
+  }
+  if (!s.activePersonaId || !s.personas.some((p) => p.id === s.activePersonaId)) {
+    s.activePersonaId = s.defaultPersonaId;
+  }
+  for (const c of s.characters || []) {
+    if (!c.knownPersonaId) c.knownPersonaId = s.defaultPersonaId;
+    if (!c.proactivity) c.proactivity = 'mid';
+  }
+  for (const r of s.rooms || []) {
+    if (!r.personaId) r.personaId = s.defaultPersonaId;
+  }
+  for (const post of s.posts || []) {
+    if (post.authorId === 'player' && !post.personaId) post.personaId = s.defaultPersonaId;
+  }
+  for (const list of Object.values(s.commentsByPostId || {})) {
+    for (const cm of list) {
+      if (cm.authorId === 'player' && !cm.personaId) cm.personaId = s.defaultPersonaId;
+    }
+  }
+  if (!s.posts) s.posts = [];
+  if (!s.commentsByPostId) s.commentsByPostId = {};
+  if (!s.socialSeededCharIds) s.socialSeededCharIds = [];
+  if (s.currentPostId === undefined) s.currentPostId = null;
+  if (!s.worldbooks) s.worldbooks = [];
+  if (s.currentWorldbookId === undefined) s.currentWorldbookId = null;
+  if (s.apiConfig) {
+    if (!s.apiConfig.maxReplyChars) s.apiConfig.maxReplyChars = { dm: 800, group: 1200, story: 4000 };
+    if (!Array.isArray(s.apiConfig.presets)) s.apiConfig.presets = [null, null, null];
+    if (s.apiConfig.contextBudget === undefined) s.apiConfig.contextBudget = 20000;
+    if (s.apiConfig.useRealApi === undefined) s.apiConfig.useRealApi = false;
+    if (s.apiConfig.temperature === undefined) s.apiConfig.temperature = 1.0;
+    if (s.apiConfig.topP === undefined) s.apiConfig.topP = 0.95;
+    if (s.apiConfig.thinkingBudget === undefined) s.apiConfig.thinkingBudget = '';
+    if (!Array.isArray(s.apiConfig.modelList)) s.apiConfig.modelList = [];
+  }
+  if (!s.phoneView) s.phoneView = s.currentRoomId ? 'chat-room' : 'home';
+  // 舊版頁面名稱 → 新版多層介面頁面
+  const viewMap = {
+    'list-dm': 'chat-friends',
+    'list-group': 'chat-rooms',
+    'list-story': 'story-list',
+  };
+  if (viewMap[s.phoneView]) s.phoneView = viewMap[s.phoneView];
+  if (s.phoneView === 'room') {
+    const room = (s.rooms || []).find((r) => r.id === s.currentRoomId);
+    s.phoneView = room && room.type === 'story' ? 'story-room' : 'chat-room';
+  }
+  // 防禦:任何無法辨識的頁面值,一律安全退回主畫面(只改頁面指標,不動資料)
+  const KNOWN_VIEWS = [
+    'home', 'chat-friends', 'chat-rooms', 'chat-room', 'social-feed', 'social-post',
+    'story-list', 'story-room', 'people', 'people-character', 'settings',
+    'worldbook', 'worldbook-detail', 'character-diary', 'player',
+  ];
+  if (!KNOWN_VIEWS.includes(s.phoneView)) s.phoneView = 'home';
+  return s;
+}
+
+/**
+ * 初始化 state:優先讀取 IndexedDB;沒有資料時依 config 建立初始 state。
+ * @param {object} loadedConfig data/config.json 的內容
+ */
+export async function initState(loadedConfig) {
+  config = loadedConfig;
+
+  // 讀取失敗(權限、損毀、私密模式限制等)時直接拋出,
+  // 交給 app.js 顯示錯誤畫面——絕不在讀不到的情況下建立空 state 存檔,
+  // 以免覆蓋掉其實還在的舊資料。
+  const saved = await loadState();
+
+  if (saved) {
+    state = migrate(saved);
+    return state;
+  }
+
+  // 目前資料庫確實沒有資料:先安全搜尋其他可能的舊資料庫名稱(唯讀,不動來源)。
+  const legacy = await findLegacyState();
+  if (legacy) {
+    state = migrate(legacy.state);
+    await persist(); // 複製一份到目前資料庫;來源資料庫原封不動
+    return state;
+  }
+
+  // 真的完全沒有任何舊資料,才建立初始 state(同樣過一次 migrate,確保欄位齊全)。
+  state = migrate(createInitialState(config));
+  await persist();
+  return state;
+}
+
+/** 取得目前的 state 物件(直接引用,修改後請呼叫 persist)。 */
+export function getState() {
+  return state;
+}
+
+/** 取得 config.json 內容。 */
+export function getConfig() {
+  return config;
+}
+
+/** 將目前 state 寫入 IndexedDB。 */
+export async function persist() {
+  await saveState(state);
+}
+
+/** 清除本機資料並回到初始狀態。 */
+export async function resetAll() {
+  await clearState();
+  state = createInitialState(config);
+  await persist();
+  return state;
+}
+
+/* -------- 常用查詢 helpers -------- */
+
+export function getCharacter(id) {
+  return state.characters.find((c) => c.id === id) || null;
+}
+
+export function getRoom(id) {
+  return state.rooms.find((r) => r.id === id) || null;
+}
+
+export function getRoomMessages(roomId) {
+  if (!state.messagesByRoom[roomId]) state.messagesByRoom[roomId] = [];
+  return state.messagesByRoom[roomId];
+}
+
+/** room 內的角色參與者(排除 "player")。 */
+export function getRoomCharacters(room) {
+  return room.participantIds
+    .filter((pid) => pid !== 'player')
+    .map((pid) => getCharacter(pid))
+    .filter(Boolean);
+}
+
+/* ------------------------------------------------------------
+ * 全域備份:匯出/匯入整份 state(含角色、對話、社群、記憶、世界書、設定)
+ * ------------------------------------------------------------ */
+
+export function exportStateJson() {
+  // 深拷貝後移除機密:API 金鑰絕不進入備份檔(備份常被傳到雲端/通訊軟體)。
+  // 不可動到執行中的 state。
+  const copy = JSON.parse(JSON.stringify(state));
+  if (copy.apiConfig) {
+    copy.apiConfig.apiKey = '';
+    if (Array.isArray(copy.apiConfig.presets)) {
+      copy.apiConfig.presets = copy.apiConfig.presets.map(
+        (p) => (p ? { ...p, apiKey: '' } : p),
+      );
+    }
+  }
+  return JSON.stringify(
+    { exportedAt: Date.now(), app: 'private-signal', secretsExcluded: true, state: copy },
+    null,
+    2,
+  );
+}
+
+/**
+ * 從備份 JSON 匯入。驗證基本結構後覆蓋目前資料(呼叫端應先讓使用者確認)。
+ * 回傳匯入後的 state;格式不對則丟出錯誤、不動任何資料。
+ */
+export async function importStateJson(jsonText) {
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonText);
+  } catch {
+    throw new Error('不是有效的 JSON 檔');
+  }
+  const candidate = parsed.state && parsed.app === 'private-signal' ? parsed.state : parsed;
+  if (!candidate || !Array.isArray(candidate.characters) || !Array.isArray(candidate.rooms)) {
+    throw new Error('備份檔結構不符(缺少 characters / rooms)');
+  }
+  // 保留本機已輸入的 API 金鑰:備份不含機密,匯入不得清空目前裝置上的 key。
+  const localKey = state?.apiConfig?.apiKey || '';
+  const localPresetKeys = (state?.apiConfig?.presets || []).map((p) => p?.apiKey || '');
+
+  state = migrate(candidate);
+
+  if (state.apiConfig) {
+    if (!state.apiConfig.apiKey && localKey) state.apiConfig.apiKey = localKey;
+    if (Array.isArray(state.apiConfig.presets)) {
+      state.apiConfig.presets = state.apiConfig.presets.map((p, i) => {
+        if (p && !p.apiKey && localPresetKeys[i]) return { ...p, apiKey: localPresetKeys[i] };
+        return p;
+      });
+    }
+  }
+  await persist();
+  return state;
+}
