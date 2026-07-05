@@ -59,6 +59,7 @@ const els = {};
 let panelTab = 'memory';      // memory | dev
 let typingBy = '';
 let editingMemoryId = null;
+const openMemGroups = new Set(); // 總倉庫分組的展開狀態(重繪不彈回)
 let socialTypingBy = '';      // 社群留言中的「正在輸入」提示
 let socialError = '';         // 社群 AI 留言失敗時的提示(顯示一次後清除)
 let replyTargetId = null;     // 正在行內回覆的留言 id(回覆框長在該留言底下)
@@ -1637,11 +1638,13 @@ function renderCharacterDetail() {
       <form id="charEditForm">
         ${characterFormFields(c)}
         ${getState().characters.filter((o) => o.id !== c.id).length ? `
-          <div class="field-label">與其他角色的關係(留空=不提;只在雙方同場的群聊/正文注入)</div>
-          ${getState().characters.filter((o) => o.id !== c.id).map((o) => `
-            <label class="field">${esc(c.name)} 對 ${esc(o.name)}
-              <input name="rel_${esc(o.id)}" maxlength="80" value="${esc(c.relationships?.[o.id] || '')}" placeholder="例:互看不順眼但默契絕佳的隊友">
-            </label>`).join('')}
+          <details class="mem-group rel-group" ${Object.values(c.relationships || {}).some((v) => v?.trim()) ? '' : ''}>
+            <summary class="mem-subheading">與其他角色的關係(已填 ${Object.values(c.relationships || {}).filter((v) => v?.trim()).length}/${getState().characters.length - 1};留空=不提,只在雙方同場注入)</summary>
+            ${getState().characters.filter((o) => o.id !== c.id).map((o) => `
+              <label class="field">${esc(c.name)} 對 ${esc(o.name)}
+                <input name="rel_${esc(o.id)}" maxlength="80" value="${esc(c.relationships?.[o.id] || '')}" placeholder="例:互看不順眼但默契絕佳的隊友">
+              </label>`).join('')}
+          </details>
         ` : ''}
         <div class="form-actions">
           <button type="submit" class="primary-btn slim">儲存變更</button>
@@ -2775,8 +2778,10 @@ function renderMemoryPanel() {
     .map(([cid, list]) => {
       const c = getCharacter(cid);
       return `
-        <div class="mem-subheading">${esc(c ? c.name : '(已離開的角色)')} 的私密記憶</div>
-        ${list.map(memoryItemHtml).join('')}`;
+        <details class="mem-group" data-mem-group="c:${esc(cid)}">
+          <summary class="mem-subheading">${esc(c ? c.name : '(已離開的角色)')} 的私密記憶(${list.length})</summary>
+          ${list.map(memoryItemHtml).join('')}
+        </details>`;
     }).join('');
 
   const roomSections = Object.entries(mem.byRoomId)
@@ -2784,20 +2789,35 @@ function renderMemoryPanel() {
     .map(([rid, list]) => {
       const r = getRoom(rid);
       return `
-        <div class="mem-subheading">場景「${esc(r ? r.title : '(已刪除)')}」的記憶</div>
-        ${list.map(memoryItemHtml).join('')}`;
+        <details class="mem-group" data-mem-group="r:${esc(rid)}">
+          <summary class="mem-subheading">場景「${esc(r ? r.title : '(已刪除)')}」的記憶(${list.length})</summary>
+          ${list.map(memoryItemHtml).join('')}
+        </details>`;
     }).join('');
 
   els.panelBody.innerHTML = `
     <div class="panel-note">這裡是「總倉庫」:不管你現在開著哪個 App,它都列出全站所有記憶(依歸屬分組)。各對話自己的記憶,主要入口是該對話標題列的「記憶」抽屜。</div>
     <div class="panel-note">在聊天訊息或社群貼文上按「記住」,就能把它變成一條可編輯的記憶。DM 的記憶只有該角色本人看得到。</div>
     <div class="mem-heading">共享記憶(所有角色可見,含社群)</div>
-    ${mem.shared.length ? mem.shared.map(memoryItemHtml).join('') : '<div class="panel-empty small">尚無共享記憶</div>'}
+    ${mem.shared.length
+    ? `<details class="mem-group" data-mem-group="shared">
+         <summary class="mem-subheading">全部共享記憶(${mem.shared.length})</summary>
+         ${mem.shared.map(memoryItemHtml).join('')}
+       </details>`
+    : '<div class="panel-empty small">尚無共享記憶</div>'}
     <div class="mem-heading">角色私密記憶(僅本人可見)</div>
     ${privateSections || '<div class="panel-empty small">尚無私密記憶</div>'}
     <div class="mem-heading">場景記憶(僅在場角色可見)</div>
     ${roomSections || '<div class="panel-empty small">尚無場景記憶</div>'}`;
 
+  els.panelBody.querySelectorAll('.mem-group').forEach((d) => {
+    if (openMemGroups.has(d.dataset.memGroup)) d.open = true;
+    if (editingMemoryId && d.querySelector(`.memory-item[data-mem="${editingMemoryId}"]`)) d.open = true;
+    d.addEventListener('toggle', () => {
+      if (d.open) openMemGroups.add(d.dataset.memGroup);
+      else openMemGroups.delete(d.dataset.memGroup);
+    });
+  });
   els.panelBody.querySelectorAll('[data-mem-edit]').forEach((b) => b.addEventListener('click', () => {
     editingMemoryId = b.dataset.memEdit;
     renderMemoryPanel();

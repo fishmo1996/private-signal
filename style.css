@@ -1787,3 +1787,19 @@ body.theme-berry .avatar.player { color: #ffffff; }
 /* 淺色主題:桌面左側導覽補覆寫(深色殘留最後一塊) */
 body.theme-sage .sidebar { background: rgba(240, 245, 240, 0.85); }
 body.theme-berry .sidebar { background: rgba(253, 243, 246, 0.88); }
+
+/* 總倉庫分組折疊 */
+.mem-group { margin-bottom: 6px; }
+.mem-group > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 7px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  user-select: none;
+}
+.mem-group > summary::-webkit-details-marker { display: none; }
+.mem-group > summary::before { content: '▸ '; font-size: 10px; opacity: 0.7; }
+.mem-group[open] > summary::before { content: '▾ '; }
+body.theme-sage .mem-group > summary { background: rgba(90, 120, 95, 0.10); }
+body.theme-berry .mem-group > summary { background: rgba(200, 120, 150, 0.10); }
