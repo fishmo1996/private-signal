@@ -12,6 +12,8 @@ import { buildPrompt, buildGroupPrompt, buildStoryPrompt, buildPeekPrompt } from
 import { getApiConfig, generateReply, stripNamePrefix, parseGroupReplies } from './api.js';
 import { extractVoiceTag, extractMoodTag } from './voice.js';
 import { anniversaryTextFor } from './album.js';
+import { anniversaryMemoryHits } from './memory.js';
+import { ttsAvailable } from './voice.js';
 
 /* ---------------- 基礎工具 ---------------- */
 
@@ -64,7 +66,7 @@ function memoryHintOf(prompt, seed) {
   return m.content.length > 24 ? m.content.slice(0, 24) + '…' : m.content;
 }
 
-function appendMessage(roomId, { role, senderId, content, image = null, sharedPost = null, choices = null, voice = false }) {
+function appendMessage(roomId, { role, senderId, content, image = null, sharedPost = null, choices = null, voice = false, missedCall = false }) {
   const msgs = getRoomMessages(roomId);
   const msg = {
     id: genId('msg'),
@@ -75,6 +77,7 @@ function appendMessage(roomId, { role, senderId, content, image = null, sharedPo
     ...(sharedPost ? { sharedPost } : {}),   // {postId, authorName, excerpt, image}:引用的貼文卡
     ...(choices && choices.length ? { choices } : {}), // 正文行動選項(僅最後一則顯示)
     ...(voice ? { voice: true } : {}),                 // 語音訊息(以聲波樣式呈現,點播用 TTS 唸)
+    ...(missedCall ? { missedCall: true } : {}),       // 未接來電留言(提案 D):程式端設定,不靠模型標記
     createdAt: Date.now(),
   };
   msgs.push(msg);
@@ -550,6 +553,41 @@ export async function selfChat(roomId, notify, opts = {}) {
   }
 }
 
+/* ------------------------------------------------------------
+ * 提案 G:內心話。按需生成「他說這句話當下心裡真正在想什麼」,
+ * 存進訊息的 innerVoice 欄(再按=展開,不重打)。素材=本人 DM prompt 範圍。
+ * ------------------------------------------------------------ */
+const innerVoiceBusy = new Set();
+
+export async function generateInnerVoice(roomId, messageId) {
+  const room = getRoom(roomId);
+  if (!room || room.type !== 'dm') return { ok: false, message: '內心話目前只支援私訊' };
+  const msg = (getRoomMessages(roomId) || []).find((m) => m.id === messageId);
+  if (!msg || msg.role !== 'character') return { ok: false, message: '只有角色的訊息有內心話' };
+  if (msg.innerVoice) return { ok: true, cached: true, text: msg.innerVoice };
+  if (innerVoiceBusy.has(messageId)) return { ok: false, message: '生成中…' };
+  innerVoiceBusy.add(messageId);
+  try {
+    const character = getRoomCharacters(room)[0];
+    const cfg = getApiConfig();
+    let text;
+    if (cfg.useRealApi && cfg.apiKey && cfg.model) {
+      const prompt = buildPrompt({ character, roomId, innerVoiceOf: messageId });
+      const r = await generateReply(cfg, prompt, { tier: 'secondary' });
+      if (!r.ok) return { ok: false, message: r.message };
+      text = stripNamePrefix(r.text, [character.name]).trim();
+      if (!text) return { ok: false, message: '模型回傳了空內容,再按一次試試' };
+    } else {
+      text = '(嘴上說得輕鬆,其實剛剛心跳快得不像話。希望沒被發現。)';
+    }
+    msg.innerVoice = text;
+    await persist();
+    return { ok: true, text };
+  } finally {
+    innerVoiceBusy.delete(messageId);
+  }
+}
+
 /** 聊天感模式:把「---」分隔的回覆拆成多則(上限 3),像連發訊息。 */
 export function splitChatParts(text) {
   return String(text || '')
@@ -629,6 +667,14 @@ export function proactivityScoreFor(roomId) {
     score += 2.0;
     reasons.unshift(anni);
   }
+  // 記憶紀念日(提案 C):滿月/週年/年年今日 → 更可能主動來找你(+1.5)
+  const memAnni = anniversaryMemoryHits(character.id, room?.id || null);
+  if (memAnni.length) {
+    score += 1.5;
+    const h = memAnni[0];
+    const label = h.type === 'annual' ? '每年的今天' : h.type === 'yearly' ? `滿 ${h.n} 年` : `滿 ${h.n} 個月`;
+    reasons.unshift(`今天距離「${String(h.memory.content).slice(0, 30)}」${label},你想起了這件事`);
+  }
   // 記憶鉤子:釘選的私密記憶(通常是「之後要一起…」這類重要事項)
   const pinned = (getState().memories.byCharacterId[character.id] || []).filter((m) => m.pinned);
   if (pinned.length) {
@@ -676,6 +722,15 @@ export async function refreshChats(opts = {}) {
   const character = getRoomCharacters(room)[0];
   if (!character) return { ok: true };
 
+  // 提案 D:未接來電(方案 b,擁有者核准)——high 才常來電、mid 低機率、low/off 永不;
+  // 紀念日當天(提案 C 聯動)機率加成:有件事重要到想直接講。
+  const CALL_CHANCE = { high: 0.3, mid: 0.1 };
+  let callChance = CALL_CHANCE[character.proactivity || 'mid'] || 0;
+  if (callChance > 0 && anniversaryMemoryHits(character.id, room.id).length) {
+    callChance = Math.min(0.9, callChance + 0.25);
+  }
+  const isCall = callChance > 0 && rng() < callChance;
+
   const cfg = getApiConfig();
   let content = '';
   if (cfg.useRealApi && cfg.apiKey && cfg.model) {
@@ -684,7 +739,9 @@ export async function refreshChats(opts = {}) {
       ...prompt.messages,
       {
         role: 'user',
-        content: `(系統:你想主動傳一則訊息給玩家。原因:${reason}。讓訊息自然呼應這個原因——可以延續話題、追問、分享近況。只輸出訊息內容本身,1~2 句,不要名字前綴。)`,
+        content: isCall
+          ? `(系統:你剛才打電話給玩家,但對方沒有接,現在要留一段語音留言。原因:${reason}。來電代表有件事重要到想直接講——交代一件具體的事,或一種憋不住想說的心情;開頭自然,像撥不通之後會說的話。一段完成的話(約 100~250 字),只輸出留言內容本身,不要名字前綴、不要任何標記格式。)`
+          : `(系統:你想主動傳一則訊息給玩家。原因:${reason}。讓訊息自然呼應這個原因——可以延續話題、追問、分享近況。只輸出訊息內容本身,1~2 句,不要名字前綴。)`,
       },
     ];
     const r = await generateReply(cfg, prompt);
@@ -692,7 +749,13 @@ export async function refreshChats(opts = {}) {
     content = stripNamePrefix(r.text, [character.name]);
   } else {
     const seed = hashStr(character.id) + Math.floor(Date.now() / 60000);
-    content = pick([
+    if (isCall) {
+      content = pick([
+        '喂?……沒接喔。也沒什麼大事,就是剛剛突然很想聽你的聲音。看到回我一下。',
+        '是我。有件事想直接跟你說,結果你沒接……算了,等你回電,別太晚。',
+        '你在忙吧。我留個言:今天發生了一件事,我第一個想到的就是你。回來打給我。',
+      ], seed);
+    } else content = pick([
       '欸,突然想到你。最近还好嗎?',
       '在忙嗎?沒事,就想丟個訊息。',
       `${traitOf(character) ? `${traitOf(character)}的人` : '我'}也是會先開口的。哈囉。`,
@@ -706,7 +769,9 @@ export async function refreshChats(opts = {}) {
   const vtP = extractVoiceTag(mdP.content);
   appendMessage(room.id, {
     role: 'character', senderId: character.id, content: vtP.content,
-    ...(vtP.voice ? { voice: true } : {}),
+    ...(isCall
+      ? { missedCall: true, ...(ttsAvailable() ? { voice: true } : {}) }
+      : (vtP.voice ? { voice: true } : {})),
   });
   room.unread = true;
   await persist();

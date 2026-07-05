@@ -76,8 +76,22 @@ function migrate(s) {
   if (s.settings.chatFeel === undefined) s.settings.chatFeel = true;   // DM 聊天感:1~3 則短訊、口語、去旁白
   if (s.settings.moodEmoji === undefined) s.settings.moodEmoji = true; // DM 標題列的角色當下心情小表情
   if (s.settings.storyDirector === undefined) s.settings.storyDirector = true; // 內建正文導演指令(單/多人自動切換,英文省 token)
+  if (s.settings.secondaryForSocialDiary === undefined) s.settings.secondaryForSocialDiary = false; // 社群發文/留言與日記走次要模型
   for (const ps of s.personas || []) {
     if (ps.label === undefined) ps.label = '';
+  }
+  {
+    // 提案 C:記憶補 eventDate(由 createdAt 導出;annualDate 選填不回填)
+    const pad = (n) => String(n).padStart(2, '0');
+    const keyOf = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+    const fill = (m) => { if (m && m.eventDate === undefined) m.eventDate = m.createdAt ? keyOf(m.createdAt) : ''; };
+    (s.memories?.shared || []).forEach(fill);
+    Object.values(s.memories?.byCharacterId || {}).forEach((l) => l.forEach(fill));
+    Object.values(s.memories?.byRoomId || {}).forEach((l) => l.forEach(fill));
+  }
+  // 提案 I:關係階段欄(dm/story)
+  for (const r of s.rooms || []) {
+    if ((r.type === 'dm' || r.type === 'story') && r.relationshipStage === undefined) r.relationshipStage = '';
   }
   if (!s.settings.appIcons || typeof s.settings.appIcons !== 'object') s.settings.appIcons = {}; // {appId: dataURL} 自訂圖示包
   if (!Array.isArray(s.settings.quickReplies)) s.settings.quickReplies = ['繼續', '(描寫得更細一點)'];

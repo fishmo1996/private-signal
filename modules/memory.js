@@ -99,10 +99,16 @@ function locateMemory(memoryId) {
   return null;
 }
 
-export async function editMemory(memoryId, newContent) {
+export async function editMemory(memoryId, newContent, patch = {}) {
   const loc = locateMemory(memoryId);
   if (!loc) return;
-  loc.list[loc.idx].content = newContent.trim();
+  const m = loc.list[loc.idx];
+  m.content = newContent.trim();
+  if (patch.eventDate !== undefined) m.eventDate = String(patch.eventDate || '').trim();
+  if (patch.annualDate !== undefined) {
+    const ad = String(patch.annualDate || '').trim();
+    m.annualDate = /^\d{2}-\d{2}$/.test(ad) ? ad : '';
+  }
   await persist();
 }
 
@@ -189,7 +195,7 @@ export async function generateSummaryCandidates(roomId) {
       .map((m) => m.content.replace(/\s+/g, ' ').slice(0, 50));
     return { ok: true, items };
   }
-  const r = await generateReply(cfg, buildSummaryPrompt(roomId));
+  const r = await generateReply(cfg, buildSummaryPrompt(roomId), { tier: 'secondary' });
   if (!r.ok) return { ok: false, message: r.message };
   let raw = r.text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   const st = raw.indexOf('['); const en = raw.lastIndexOf(']');
@@ -258,4 +264,71 @@ export async function archiveChapter(roomId, { title = '' } = {}) {
 
   await persist();
   return { ok: true, n, title: chapterTitle, summaryCount: r.items.length };
+}
+
+/* ------------------------------------------------------------
+ * 提案 C:紀念日自動感知(全本地日期運算,零額外 API)。
+ * eventDate 預設由 createdAt 導出;annualDate 為生日類年年觸發。
+ * ------------------------------------------------------------ */
+
+/** Date → 'YYYY-MM-DD'(本地時區)。 */
+export function dateKeyOf(ts) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** 相對時間附註:'(約 N 天前 / N 個月前 / N 年前)';不足 1 天回 null。 */
+export function relativeTimeNote(memory, now = Date.now()) {
+  const base = memory.eventDate
+    ? new Date(`${memory.eventDate}T12:00:00`).getTime()
+    : memory.createdAt;
+  if (!base) return null;
+  const days = Math.floor((now - base) / 86400000);
+  if (days < 1) return null;
+  if (days < 60) return `(約 ${days} 天前)`;
+  if (days < 365) return `(約 ${Math.floor(days / 30)} 個月前)`;
+  return `(約 ${Math.floor(days / 365)} 年前,${Math.floor((days % 365) / 30)} 個月)`;
+}
+
+/**
+ * 紀念日偵測:回傳 null 或 { type:'monthly'|'yearly'|'annual', n }。
+ * monthly=事件日同「日」且至少滿 1 個月;yearly=同月同日且至少滿 1 年(yearly 優先於 monthly);
+ * annual=annualDate(MM-DD)命中今天,n=0(年年觸發,不算年數)。
+ */
+export function anniversaryInfo(memory, now = Date.now()) {
+  const today = new Date(now);
+  if (memory.annualDate) {
+    const key = `${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    if (memory.annualDate === key) return { type: 'annual', n: 0 };
+  }
+  const evStr = memory.eventDate || (memory.createdAt ? dateKeyOf(memory.createdAt) : null);
+  if (!evStr) return null;
+  const [ey, em, ed] = evStr.split('-').map(Number);
+  const sameDay = today.getDate() === ed;
+  if (!sameDay) return null;
+  const monthsDiff = (today.getFullYear() - ey) * 12 + (today.getMonth() + 1 - em);
+  if (monthsDiff <= 0) return null;
+  if (today.getMonth() + 1 === em) return { type: 'yearly', n: today.getFullYear() - ey };
+  return { type: 'monthly', n: monthsDiff };
+}
+
+/** 一位角色「今天」命中的紀念日記憶(私密+其圈子共享+指定房的場景記憶)。 */
+export function anniversaryMemoryHits(characterId, roomId = null, now = Date.now()) {
+  const state = getState();
+  const c = getCharacterById(characterId);
+  const pools = [
+    ...(state.memories.byCharacterId[characterId] || []),
+    ...sharedMemoriesFor(c?.knownPersonaId || state.defaultPersonaId),
+    ...(roomId ? (state.memories.byRoomId[roomId] || []) : []),
+  ];
+  const hits = [];
+  for (const m of pools) {
+    const info = anniversaryInfo(m, now);
+    if (info) hits.push({ memory: m, ...info });
+  }
+  return hits.slice(0, 2); // 一天最多兩個,避免轟炸
+}
+
+function getCharacterById(id) {
+  return (getState().characters || []).find((x) => x.id === id) || null;
 }

@@ -353,7 +353,8 @@ export async function generateSocialReplies({ post, triggerText, triggerPersonaI
     }
     return { ok: true, replies: mock };
   }
-  const r = await generateReply(cfg, buildSocialPrompt({ post, triggerText, replyToName }));
+  const r = await generateReply(cfg, buildSocialPrompt({ post, triggerText, replyToName }),
+    { tier: getState().settings.secondaryForSocialDiary ? 'secondary' : 'primary' });
   if (!r.ok) return { ok: false, message: r.message };
   const replies = parseGroupReplies(r.text, circleChars)
     .map((p, i) => ({ ...p, delay: 800 + i * 900 }));
@@ -412,6 +413,12 @@ export function buildAutoPostPrompt(character, rng = Math.random) {
     `【共享記憶(公開)】\n${shared}`,
     `【世界書】\n${loreText}`,
     `【最近的社群動態】\n${recentPosts}`,
+    ...(() => {
+      const own = state.posts.filter((po) => po.authorId === character.id)
+        .slice(0, 4).map((po) => `- ${String(po.content).slice(0, 60)}`).join('\n'); // posts 新在前
+      return own ? [`【你自己最近發過的貼文(以下的話題、物件、句式這次都不要再用)】\n${own}\n`
+        + '這次換一個完全不同的生活切面:別的食物、路上看到的東西、天氣、工作、無聊的觀察、突然想起的回憶……開頭句式也要不一樣。'] : [];
+    })(),
     dmLines
       ? `【你和玩家最近的私訊(只有你自己知道,別人看不到)】\n${dmLines}\n`
         + '貼文可以受這些對話的心情或話題啟發,但這是公開版面——像真人一樣含蓄,不要把私訊內容原文貼出來或全盤托出。'
@@ -443,7 +450,15 @@ export async function refreshFeed(opts = {}) {
   state.socialLastRefresh = Date.now();
   await persist();
 
-  const chars = state.characters.filter((c) => !c.noPhone);
+  const PER_CHAR_POST_COOLDOWN_MS = 3 * 60 * 60 * 1000; // 單角色發文冷卻:3 小時內發過的不再發
+  const lastPostAt = {};
+  for (const post of state.posts) {
+    if (post.authorId !== 'player') {
+      lastPostAt[post.authorId] = Math.max(lastPostAt[post.authorId] || 0, post.createdAt || 0);
+    }
+  }
+  const chars = state.characters.filter((c) => !c.noPhone
+    && (Date.now() - (lastPostAt[c.id] || 0)) > PER_CHAR_POST_COOLDOWN_MS);
   if (!chars.length) return { ok: true, posted: 0 };
 
   // 0~2 位:25% 沒人發、50% 一位、25% 兩位(受角色數限制)
@@ -462,7 +477,8 @@ export async function refreshFeed(opts = {}) {
   let posted = 0;
   for (const c of pickedChars) {
     if (cfg.useRealApi && cfg.apiKey && cfg.model) {
-      const r = await generateReply(cfg, buildAutoPostPrompt(c, rng));
+      const r = await generateReply(cfg, buildAutoPostPrompt(c, rng),
+        { tier: getState().settings.secondaryForSocialDiary ? 'secondary' : 'primary' });
       if (!r.ok) return { ok: false, posted, message: r.message };
       const content = stripNamePrefix(r.text, [c.name]);
       if (content) { await createPost(c.id, content); posted += 1; }

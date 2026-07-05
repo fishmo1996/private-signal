@@ -8,7 +8,7 @@
 import { getState, getRoom, getRoomMessages, getRoomCharacters } from './state.js';
 import { matchEntries } from './worldbook.js';
 import { personaForRoom, getPersona } from './persona.js';
-import { sharedMemoriesFor } from './memory.js';
+import { sharedMemoriesFor, relativeTimeNote, anniversaryMemoryHits } from './memory.js';
 import { albumTextFor, anniversaryTextFor } from './album.js';
 
 const HARD_MESSAGE_CAP = 80;
@@ -46,7 +46,7 @@ function relationshipSection(participants) {
 /** 【現在時間】段(現實時間軸;noPhone 與正文不使用)。 */
 function nowSection(lastMsgTs = null) {
   const line = `現在是 ${fmtMsgTime(Date.now())}`;
-  const noEcho = '對話紀錄裡訊息前的「(日期 時間)」是系統附註,只供你理解時間脈絡——你的輸出絕對不要包含這種時間戳。';
+  const noEcho = '對話紀錄裡訊息前的「(日期 時間)」與記憶後的「(約 N 天前)」都是系統附註,只供你理解時間脈絡——你的輸出絕對不要包含這些格式。';
   return lastMsgTs
     ? [`【現在時間】${line};上一則訊息是${fmtGap(lastMsgTs)}。${noEcho}`]
     : [`【現在時間】${line}。${noEcho}`];
@@ -103,7 +103,7 @@ const CROSS_ROOM_LIMIT = 4;
  * @param {string} opts.roomId 目前 room
  * @returns {{system:string, messages:Array, meta:object}}
  */
-export function buildPrompt({ character, roomId }) {
+export function buildPrompt({ character, roomId, innerVoiceOf = null }) {
   const state = getState();
   const room = getRoom(roomId);
   const participants = getRoomCharacters(room);
@@ -118,7 +118,12 @@ export function buildPrompt({ character, roomId }) {
 
   /* --- 目前 room 最近訊息 --- */
   const useRealTime = !character.noPhone; // 現實時間軸:非現代角色不吃
-  const recentMessages = budgetSlice(getRoomMessages(roomId))
+  let srcMsgs = getRoomMessages(roomId);
+  if (innerVoiceOf) {
+    const idx = srcMsgs.findIndex((mm) => mm.id === innerVoiceOf);
+    if (idx >= 0) srcMsgs = srcMsgs.slice(0, idx + 1);
+  }
+  const recentMessages = budgetSlice(srcMsgs)
     .slice()
     .map((m) => {
       const base = m.sharedPost
@@ -171,8 +176,10 @@ export function buildPrompt({ character, roomId }) {
     `【情境】${character.scenario || '(未提供)'}`,
     `【玩家】${persona?.name || '(未命名玩家)'}:${persona?.description || '(未提供描述)'}`,
     `【目前聊天室】類型 ${room.type},名稱「${room.title}」,參與角色:${participants.map((c) => c.name).join('、') || '(無)'}`,
-    `【共享記憶】\n${formatMemories(sharedMemories)}`,
-    `【${character.name} 的私密記憶(其他角色不可見)】\n${formatMemories(privateMemories)}`,
+    `【共享記憶】\n${formatMemories(sharedMemories, { withRelativeTime: true })}`,
+    `【${character.name} 的私密記憶(其他角色不可見)】\n${formatMemories(privateMemories, { withRelativeTime: true })}`,
+    ...anniversarySection(character.id, roomId),
+    ...(room.relationshipStage?.trim() ? [`【目前與玩家的關係階段】${room.relationshipStage.trim()}(作為背景理解,不要逐字複述此欄內容)`] : []),
     ...(albumTextFor(character.id) ? [`【共同的回憶(相簿)】\n${albumTextFor(character.id)}`] : []),
     ...(!character.noPhone && anniversaryTextFor(character.id) ? [`【特別的日子】${anniversaryTextFor(character.id)}——如果自然,可以提起它。`] : []),
     `【本場景記憶(僅本 room 參與者可見)】\n${formatMemories(roomMemories)}`,
@@ -180,7 +187,9 @@ export function buildPrompt({ character, roomId }) {
     ...(useRealTime ? nowSection(lastTs) : []),
     ...(character.noPhone ? [] : [`【最近的社群動態(公開,所有人都看得到)】\n${recentFeedText(state)}`]),
     `【其他介面中,${character.name} 可知曉的近期內容】\n${formatCross(crossContext)}`,
-    `【回覆指令】${styleGuide} ${
+    innerVoiceOf
+      ? '【任務】以下不是要你回覆對話:請寫出你剛才說出最後那則訊息的「當下」,心裡真正的想法——表面沒說出口的部分(動作洩漏的、語氣藏著的、不敢講的)。第一人稱純內心獨白,100~200 字;不要對玩家喊話、不要引號包裹、不要描述自己的動作、不要任何標記格式。輸出繁體中文。'
+      : `【回覆指令】${styleGuide} ${
   state.settings?.chatFeel !== false
     ? '以真實聊天軟體的口吻回覆:第一人稱、口語、像在打字。把回覆拆成 1~3 則短訊息(每則不超過 100 字),訊息之間用單獨一行「---」分隔。絕對不要第三人稱旁白敘事(不要寫「他抓了抓頭髮」這種)。動作或神態通常不用寫——真人打字很少描述自己的動作;偶爾需要時才用括號短註,而且要貼合你當下真實在做的事,不要有固定口頭禪式的重複動作。'
     : ''
@@ -218,7 +227,7 @@ export function buildPrompt({ character, roomId }) {
     system,
     messages: recentMessages,
     meta: {
-      maxReplyChars,
+      maxReplyChars: innerVoiceOf ? 300 : maxReplyChars,
       loreEntryCount: loreEntries.length,
       characterId: character.id,
       roomId,
@@ -353,7 +362,7 @@ export function buildGroupPrompt({ roomId, mentionName = null, selfTalk = false 
     `【聊天室】「${room.title}」,成員:${participants.map((c) => c.name).join('、')}`,
     `【角色公開資料】\n${profiles}`,
     `【玩家】${personaG?.name || '(未命名玩家)'}:${personaG?.description || '(未提供描述)'}`,
-    `【共享記憶】\n${formatMemories(sharedMemories)}`,
+    `【共享記憶】\n${formatMemories(sharedMemories, { withRelativeTime: true })}`,
     `【本聊天室記憶】\n${formatMemories(roomMemories)}`,
     `【世界書(依關鍵字觸發)】\n${loreText}`,
     ...relationshipSection(participants),
@@ -459,6 +468,7 @@ export function buildStoryPrompt({ roomId }) {
     ...globalPromptSection(roomId),
     `你是互動小說的說書人,負責「${room.title}」這個場景。`,
     ...(room.statusBar?.trim() ? [`【當前狀態(劇情時間/地點/狀態,以此為準)】${room.statusBar.trim()}`] : []),
+    ...(room.relationshipStage?.trim() ? [`【目前與玩家的關係階段】${room.relationshipStage.trim()}(作為背景理解,不要逐字複述此欄內容)`] : []),
     `【在場角色(公開資料)】\n${profiles}`,
     `【玩家角色】${persona?.name || '(未命名玩家)'}:${persona?.description || '(未提供描述)'}`,
     ...relationshipSection(participants),
@@ -476,9 +486,23 @@ export function buildStoryPrompt({ roomId }) {
   return { system, messages: recentMessages, meta: { maxReplyChars, roomType: 'story', participantCount: participants.length } };
 }
 
-function formatMemories(list) {
+function formatMemories(list, { withRelativeTime = false } = {}) {
   if (!list.length) return '(無)';
-  return list.map((m) => `- ${m.pinned ? '📌 ' : ''}${m.content}`).join('\n');
+  return list.map((m) => {
+    const note = withRelativeTime ? (relativeTimeNote(m) || '') : '';
+    return `- ${m.pinned ? '📌 ' : ''}${m.content}${note}`;
+  }).join('\n');
+}
+
+/** 提案 C:今天命中的紀念日 → 醒目段落(程式算好餵給模型,模型不用會算數學)。 */
+function anniversarySection(characterId, roomId) {
+  const hits = anniversaryMemoryHits(characterId, roomId);
+  if (!hits.length) return [];
+  const lines = hits.map(({ memory, type, n }) => {
+    const label = type === 'annual' ? '每年的今天' : type === 'yearly' ? `正好滿 ${n} 年` : `正好滿 ${n} 個月`;
+    return `- 【今天距離這件事${label}】${memory.content}`;
+  }).join('\n');
+  return [`【今天是特別的日子】\n${lines}\n如果自然,可以提起或以行動表現;不必刻意宣告日期。`];
 }
 
 function formatCross(list) {

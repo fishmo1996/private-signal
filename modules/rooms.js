@@ -355,3 +355,45 @@ export async function removeRoomMember(roomId, characterId) {
   await persist();
   return room;
 }
+
+/* ------------------------------------------------------------
+ * 提案 H:時間線分岔(零 API)。
+ * 把房間複製到某則訊息(含)的時間點成為新房:開車線與日常線分家、
+ * 重大選擇兩邊都看、捨不得覆蓋的重骰。
+ * ------------------------------------------------------------ */
+
+export async function branchRoom(roomId, messageId) {
+  const state = getState();
+  const src = state.rooms.find((r) => r.id === roomId);
+  if (!src) return null;
+  const msgs = state.messagesByRoom[roomId] || [];
+  const cut = msgs.findIndex((m) => m.id === messageId);
+  if (cut < 0) return null;
+
+  const newId = genId('room');
+  const room = {
+    ...JSON.parse(JSON.stringify(src)),
+    id: newId,
+    title: `${src.title}(分岔)`,
+    createdAt: Date.now(),
+    unread: false,
+    branchedFrom: { roomId: src.id, messageId },
+  };
+  if (room.type === 'story') {
+    // 封存章全帶(封存必早於現行訊息);summarizedUpTo 不可能超過保留數
+    room.summarizedUpTo = Math.min(src.summarizedUpTo || 0, cut + 1);
+  }
+  state.rooms.push(room);
+
+  // 訊息複製至分岔點(含),全新 id
+  state.messagesByRoom[newId] = msgs.slice(0, cut + 1).map((m) => ({ ...m, id: genId('msg') }));
+
+  // 場景記憶複製一份(之後各自獨立演化)
+  const srcMems = state.memories.byRoomId[roomId] || [];
+  if (srcMems.length) {
+    state.memories.byRoomId[newId] = srcMems.map((m) => ({ ...m, id: genId('mem'), sourceRoomId: newId }));
+  }
+
+  await persist();
+  return room;
+}

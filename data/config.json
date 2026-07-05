@@ -6,8 +6,7 @@
     "playerDescription": ""
   },
   "defaultSettings": {
-    "showTimestamps": true,
-    "defaultTheme": "mist"
+    "showTimestamps": true
   },
-  "version": "v46"
+  "version": "v54"
 }

@@ -14,8 +14,8 @@ import {
   createGroup, createStory, deleteRoom,
   findDmRoom, openRoom,
 } from './rooms.js';
-import { sendUserMessage, isRoomBusy, editMessage, deleteMessage, regenerateLastReply, refreshChats , selfChat } from './chat.js';
-import { addRoomMember, removeRoomMember, createPeek } from './rooms.js';
+import { sendUserMessage, isRoomBusy, editMessage, deleteMessage, regenerateLastReply, refreshChats , selfChat, generateInnerVoice } from './chat.js';
+import { addRoomMember, removeRoomMember, createPeek, branchRoom } from './rooms.js';
 import {
   createMemoryCandidate, addMemory, editMemory, togglePin, deleteMemory, generateSummaryCandidates, commitSummary, archiveChapter, messagesSinceSummary,
 } from './memory.js';
@@ -37,6 +37,7 @@ import {
   setVoiceStateListener, estimateSeconds, setCharacterVoice,
 } from './voice.js';
 import { exportRoomJson, parseRoomImport, importRoom } from './roombackup.js';
+import { exportStoryBook } from './bookexport.js';
 import { exportCharacterPack, exportCharacterCardV2, parseCharacterImport, importCharacter } from './charcard.js';
 import { exportStateJson, importStateJson } from './state.js';
 import {
@@ -419,25 +420,30 @@ function friendRowsHtml() {
         <button class="primary-btn slim" id="btnEmptyAdd">＋ 新增角色</button>
       </div>`;
   }
-  return state.characters.map((c) => {
-    const dm = findDmRoom(c.id);
-    if (!dm) return '';
-    const msgs = state.messagesByRoom[dm.id] || [];
+  return state.characters.flatMap((c) => {
+    const dms = state.rooms.filter((r) => r.type === 'dm' && r.participantIds.includes(c.id));
+    return dms.map((dm) => rowOfDm(c, dm));
+  }).join('');
+}
+
+function rowOfDm(c, dm) {
+  const state = getState();
+  const msgs = state.messagesByRoom[dm.id] || [];
     const last = msgs[msgs.length - 1];
     const preview = last
-      ? firstLine(last.content, 20)
+      ? (last.missedCall ? '☎ 未接來電' : firstLine(last.content, 20))
       : (c.firstMessage ? firstLine(c.firstMessage, 20) : '開始聊天吧');
     return `
       <button class="list-row" data-open-room="${esc(dm.id)}">
         ${avatarHtml(c)}
         <span class="list-main">
-          <span class="list-title">${esc(c.name)}${getState().settings.moodEmoji !== false && dm.mood?.emoji ? ` ${dm.mood.emoji}` : ''}${dm.unread ? ' <span class="unread-dot" aria-label="未讀"></span>' : ''}</span>
+          <span class="list-title">${esc(c.name)}${dm.branchedFrom ? ' <span class="branch-tag">⑂分岔</span>' : ''}${getState().settings.moodEmoji !== false && dm.mood?.emoji ? ` ${dm.mood.emoji}` : ''}${dm.unread ? ' <span class="unread-dot" aria-label="未讀"></span>' : ''}</span>
           <span class="list-preview">${esc(preview)}</span>
         </span>
         ${last ? `<span class="list-time">${fmtTime(last.createdAt)}</span>` : ''}
       </button>`;
-  }).join('');
 }
+
 
 /** 旁觀分頁:角色們自己的群組,你只能偷看。 */
 function peekRowsHtml() {
@@ -587,11 +593,16 @@ function renderRoomView() {
     const items = [
       ...(room.type === 'dm' ? [['diary', '📔 日記']] : [['members', '👥 成員']]),
       ['memory', `🧠 記憶${messagesSinceSummary(room.id).length >= 30 ? '(建議摘要)' : ''}`],
-      ['note', `✏️ 作者備註${room.authorNote?.trim() ? ' ●' : ''}`],
+      ...(room.type === 'story' ? [['book', '📖 匯出成書(離線可讀)']] : []),
+      ['note', `✏️ 備註與關係階段${(room.authorNote?.trim() || room.relationshipStage?.trim()) ? ' ●' : ''}`],
       ...(deletable ? [['delete', '🗑 刪除此對話']] : []),
     ];
+    const branchNote = room.branchedFrom
+      ? `<div class="panel-note">⑂ 分岔自:${esc(getRoom(room.branchedFrom.roomId)?.title || '(已刪除的對話)')}</div>`
+      : '';
     openModal(`
       <h3>${esc(room.title)}</h3>
+      ${branchNote}
       <div class="check-list">
         ${items.map(([k, label]) => `<button class="list-row" data-room-act="${k}"><span class="list-main"><span class="list-title">${label}</span></span></button>`).join('')}
       </div>`, {
@@ -605,6 +616,15 @@ function renderRoomView() {
           else if (act === 'diary') {
             const dmChar = getRoomCharacters(room)[0];
             if (dmChar) { await navigate('character-diary', { characterId: dmChar.id }); renderAll(); }
+          } else if (act === 'book') {
+            const bookR = exportStoryBook(room.id);
+            if (!bookR) { alert('這個房間沒有可匯出的內容'); return; }
+            const blob = new Blob([bookR.html], { type: 'text/html;charset=utf-8' });
+            const aEl = document.createElement('a');
+            aEl.href = URL.createObjectURL(blob);
+            aEl.download = bookR.filename;
+            aEl.click();
+            URL.revokeObjectURL(aEl.href);
           } else if (act === 'delete') els.phoneScreen.querySelector('#__delProxy')?.click();
         }));
       },
@@ -778,6 +798,8 @@ function renderMessages() {
       </div>` : '';
     const rememberBtn = `<button class="remember-btn" data-remember="${esc(m.id)}" aria-label="記住這件事">記住</button>`
       + `<button class="remember-btn" data-msg-edit="${esc(m.id)}" aria-label="編輯訊息">編輯</button>`
+      + `<button class="remember-btn" data-msg-branch="${esc(m.id)}" aria-label="從這裡分岔">⑂</button>`
+      + (room.type === 'dm' && m.role === 'character' ? `<button class="remember-btn" data-inner-voice="${esc(m.id)}" aria-label="內心話">👁${m.innerVoice ? '' : '?'}</button>` : '')
       + `<button class="remember-btn danger" data-msg-del="${esc(m.id)}" aria-label="刪除訊息">刪除</button>`;
 
     if (m.role === 'system') {
@@ -812,7 +834,13 @@ function renderMessages() {
         ${avatarHtml(c, 'sm')}
         <div class="msg-col">
           ${nameLine}
-          ${m.voice ? `
+          ${m.missedCall ? `
+            <div class="bubble char-bubble missed-call" style="--c:${esc(c ? c.themeColor : '#6b7280')}">
+              <div class="mc-head">☎ 未接來電 · ${fmtTime(m.createdAt)}</div>
+              ${m.voice ? `<button class="mc-play" data-speak-note="${esc(m.id)}">${speakingMessageKey() === m.id ? '■ 停止' : '▶ 播放留言'}</button>` : ''}
+              <div class="mc-body">${esc(m.content).replaceAll('\n', '<br>')}</div>
+            </div>${choicesHtml}`
+    : m.voice ? `
             <div class="bubble char-bubble voice-note" style="--c:${esc(c ? c.themeColor : '#6b7280')}" data-speak-note="${esc(m.id)}">
               <span class="voice-play">${speakingMessageKey() === m.id ? '■' : '▶'}</span>
               <span class="voice-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
@@ -820,6 +848,7 @@ function renderMessages() {
             </div>
             <div class="voice-transcript">${esc(m.content).replaceAll('\n', '<br>')}</div>${choicesHtml}`
     : `<div class="bubble char-bubble" style="--c:${esc(c ? c.themeColor : '#6b7280')}">${imgHtml}${esc(m.content).replaceAll('\n', '<br>')}</div>${choicesHtml}`}
+          ${m.innerVoice ? `<div class="inner-voice" data-iv-card="${esc(m.id)}" hidden>${esc(m.innerVoice).replaceAll('\n', '<br>')}</div>` : ''}
           <div class="msg-meta">${time}${rememberBtn}</div>
         </div>
       </div>`;
@@ -918,6 +947,37 @@ function renderMessages() {
     });
   });
 
+  wrap.querySelectorAll('[data-inner-voice]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const mid = btn.dataset.innerVoice;
+      const card = wrap.querySelector(`[data-iv-card="${mid}"]`);
+      if (card) { card.hidden = !card.hidden; return; }
+      btn.disabled = true;
+      btn.textContent = '…';
+      const r = await generateInnerVoice(room.id, mid);
+      if (!r.ok) {
+        alert(r.message);
+        const b2 = wrap.querySelector(`[data-inner-voice="${mid}"]`);
+        if (b2) { b2.disabled = false; b2.textContent = '👁?'; }
+        return;
+      }
+      renderMessages();
+      const c2 = document.getElementById('messages')?.querySelector(`[data-iv-card="${mid}"]`);
+      if (c2) c2.hidden = false;
+    });
+  });
+  wrap.querySelectorAll('[data-msg-branch]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const sure = typeof window !== 'undefined' && window.confirm
+        ? window.confirm('從這則訊息分岔:將建立到此為止的新聊天室副本,原房完全不受影響。繼續?')
+        : true;
+      if (!sure) return;
+      const nr = await branchRoom(room.id, btn.dataset.msgBranch);
+      if (!nr) return;
+      await openRoom(nr.id);
+      renderAll();
+    });
+  });
   wrap.querySelectorAll('[data-msg-edit]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const msg = msgs.find((m) => m.id === btn.dataset.msgEdit);
@@ -1804,6 +1864,20 @@ function apiSectionHtml() {
         </div>
         <input id="apiModel" value="${esc(cfg.model)}" placeholder="或直接手動輸入模型名稱">
       </label>
+      <label class="field">次要模型(選填;同金鑰,雜務用便宜模型省錢)
+        <div class="model-row">
+          <select id="apiModelSelect2">
+            <option value="">— 不使用次要模型 —</option>
+            ${cfg.modelList.map((m) => `<option value="${esc(m)}" ${cfg.secondaryModel === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}
+          </select>
+        </div>
+        <input id="apiModel2" value="${esc(cfg.secondaryModel || '')}" placeholder="留空=一切照舊全走主要模型">
+        <span class="setting-hint">有設定時:記憶摘要與章節封存自動走次要;下方開關可讓社群/日記也走次要。私訊/群聊/正文/旁觀永遠走主要。</span>
+      </label>
+      <label class="check-field api-toggle">
+        <input type="checkbox" id="chkSecondarySocial" ${getState().settings.secondaryForSocialDiary ? 'checked' : ''}>
+        社群發文/留言與日記也使用次要模型(內容你會讀,品質有感,自己試試)
+      </label>
       <label class="check-field api-toggle">
         <input type="checkbox" id="chkUseRealApi" ${cfg.useRealApi ? 'checked' : ''}>
         使用真實 AI 回覆(私訊/群聊/正文全模式;群聊為單次呼叫產多角色訊息)
@@ -1862,6 +1936,7 @@ function readApiForm() {
     baseUrl: g('#apiBase') ? g('#apiBase').value.trim() : '',
     apiKey: g('#apiKey').value.trim(),
     model: g('#apiModel').value.trim(),
+    secondaryModel: g('#apiModel2') ? g('#apiModel2').value.trim() : '',
     maxReplyChars: {
       dm: Math.max(50, Number(g('#lenDm').value) || 800),
       group: Math.max(50, Number(g('#lenGroup').value) || 1200),
@@ -1902,6 +1977,14 @@ function bindApiSection() {
   // 下拉選單選了什麼,就同步進手動輸入欄(儲存以輸入欄為準)
   els.phoneScreen.querySelector('#apiModelSelect').addEventListener('change', (e) => {
     if (e.target.value) els.phoneScreen.querySelector('#apiModel').value = e.target.value;
+  });
+  els.phoneScreen.querySelector('#apiModelSelect2')?.addEventListener('change', (e) => {
+    const inp = els.phoneScreen.querySelector('#apiModel2');
+    if (inp && e.target.value) inp.value = e.target.value;
+  });
+  els.phoneScreen.querySelector('#chkSecondarySocial')?.addEventListener('change', async (e) => {
+    getState().settings.secondaryForSocialDiary = e.target.checked;
+    await persist();
   });
 
   els.phoneScreen.querySelector('#btnApiModels').addEventListener('click', async () => {
@@ -2760,6 +2843,10 @@ function memoryItemHtml(m) {
     return `
       <div class="memory-item editing" data-mem="${esc(m.id)}">
         <textarea class="mem-edit" rows="3">${esc(m.content)}</textarea>
+        <div class="mem-date-row">
+          <label>事件日期 <input type="date" class="mem-event-date" value="${esc(m.eventDate || '')}"></label>
+          <label>年年觸發(生日類,MM-DD)<input class="mem-annual-date" maxlength="5" placeholder="例 03-14" value="${esc(m.annualDate || '')}"></label>
+        </div>
         <div class="mem-actions">
           <button class="mini-btn" data-mem-save="${esc(m.id)}">儲存</button>
           <button class="mini-btn" data-mem-cancel="${esc(m.id)}">取消</button>
@@ -2835,8 +2922,12 @@ function renderMemoryPanel() {
     renderMemoryPanel();
   }));
   els.panelBody.querySelectorAll('[data-mem-save]').forEach((b) => b.addEventListener('click', async () => {
-    const box = els.panelBody.querySelector(`.memory-item[data-mem="${b.dataset.memSave}"] .mem-edit`);
-    await editMemory(b.dataset.memSave, box.value);
+    const item = els.panelBody.querySelector(`.memory-item[data-mem="${b.dataset.memSave}"]`);
+    const box = item.querySelector('.mem-edit');
+    await editMemory(b.dataset.memSave, box.value, {
+      eventDate: item.querySelector('.mem-event-date')?.value ?? undefined,
+      annualDate: item.querySelector('.mem-annual-date')?.value ?? undefined,
+    });
     editingMemoryId = null;
     renderMemoryPanel();
   }));
@@ -3742,6 +3833,7 @@ function openRoomMembersModal(room) {
 
 /** 作者備註 modal:綁在單一房間、注入 prompt 尾端的導演指令。 */
 function openAuthorNoteModal(room) {
+  const showStage = room.type === 'dm' || room.type === 'story';
   openModal(`
     <h3>作者備註</h3>
     <p class="panel-note">只作用於「${esc(room.title)}」這個對話,會以最高優先指令注入 prompt 尾端。適合寫節奏、氛圍、尺度等導演指令,例如「維持慢節奏,不要讓劇情自己推進」。留空即停用。</p>
@@ -3749,6 +3841,10 @@ function openAuthorNoteModal(room) {
       <textarea id="authorNoteBox" rows="5" maxlength="2000" data-counter placeholder="例如:子勳現在心情很差,但嘴上不承認">${esc(room.authorNote || '')}</textarea>
       <span class="char-count"></span>
     </label>
+    ${showStage ? `
+    <label class="field">關係階段(選填;例:曖昧中、交往三個月、冷戰中——給模型一個「我們現在到哪了」的錨點)
+      <input id="relStageBox" maxlength="50" value="${esc(room.relationshipStage || '')}" placeholder="留空=不注入">
+    </label>` : ''}
     <div class="form-actions">
       <button class="primary-btn slim" id="authorNoteSave">儲存</button>
     </div>`, {
@@ -3756,6 +3852,8 @@ function openAuthorNoteModal(room) {
       bindCharCounters(root);
       root.querySelector('#authorNoteSave').addEventListener('click', async () => {
         room.authorNote = root.querySelector('#authorNoteBox').value.trim();
+        const stageBox = root.querySelector('#relStageBox');
+        if (stageBox) room.relationshipStage = stageBox.value.trim();
         await persist();
         closeModal();
         renderPhone();

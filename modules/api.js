@@ -22,6 +22,7 @@ export function getApiConfig() {
   if (!state.apiConfig) {
     state.apiConfig = defaultApiConfig();
   }
+  if (state.apiConfig.secondaryModel === undefined) state.apiConfig.secondaryModel = '';
   return state.apiConfig;
 }
 
@@ -30,6 +31,7 @@ export function defaultApiConfig() {
     provider: 'openai',
     apiKey: '',
     model: '',
+    secondaryModel: '',          // 次要模型(同供應商同金鑰;空=一切照舊全走主要)
     baseUrl: '',                 // custom 供應商用
     maxReplyChars: { dm: 800, group: 1200, story: 4000 }, // 每模式一則回覆的字數上限
     contextBudget: 20000,        // 上下文預算(字數):對話歷史由新到舊裝進 prompt,裝滿即止
@@ -266,7 +268,11 @@ export function extractReplyText(provider, data) {
  * 呼叫真實 API 產生回覆。回傳 {ok, text?, message?}。
  * 失敗時誠實回報(429=額度限制、401/403=金鑰問題),不丟例外。
  */
-export async function generateReply(cfg, prompt) {
+export async function generateReply(cfg, prompt, opts = {}) {
+  // tier: 'secondary' 且有設定次要模型時,換模型不換供應商/金鑰(F 案:摘要等雜務走便宜模型)
+  if (opts.tier === 'secondary' && cfg.secondaryModel?.trim()) {
+    cfg = { ...cfg, model: cfg.secondaryModel.trim() };
+  }
   const model = normalizeModel(cfg.provider, cfg.model);
   if (!model) return { ok: false, message: '尚未設定模型,請到設定挑選' };
   if (/\s/.test(model) || (cfg.provider === 'gemini' && /[A-Z]/.test(model))) {
@@ -337,11 +343,13 @@ export function applyOutputRules(text) {
 }
 
 /** 模型鸚鵡學舌時間戳的清除:剝掉每行開頭的「(7/5(週日) 14:22)」式前綴。 */
+const REL_TIME_ECHO = /\s*[((]約\s?\d+\s?(?:天|個月|年)前[^))]{0,12}[))]/g;
 const TS_PREFIX = /^\s*[((]\d{1,2}\/\d{1,2}\s*[((]週[日一二三四五六][))]\s*\d{1,2}:\d{2}[))]\s*/gm;
 
 /** 刮掉模型愛加的「名字:」前綴;所有 AI 輸出的統一後處理點(含輸出替換規則)。 */
 export function stripNamePrefix(text, names = []) {
   text = String(text || '').replace(TS_PREFIX, ''); // 先剝時間戳,名字前綴才會回到行首
+  text = text.replace(REL_TIME_ECHO, ''); // 剝「(約 N 天前)」系統附註的鸚鵡
   let out = String(text || '');
   const list = (Array.isArray(names) ? names : [names])
     .filter(Boolean)

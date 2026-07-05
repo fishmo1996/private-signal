@@ -115,7 +115,8 @@ export async function generateDiary(characterId, opts = {}) {
   const cfg = getApiConfig();
   let content = '';
   if (cfg.useRealApi && cfg.apiKey && cfg.model) {
-    const r = await generateReply(cfg, buildDiaryPrompt(character, rng));
+    const r = await generateReply(cfg, buildDiaryPrompt(character, rng),
+      { tier: getState().settings.secondaryForSocialDiary ? 'secondary' : 'primary' });
     if (!r.ok) return { ok: false, message: r.message };
     content = stripNamePrefix(r.text, [character.name]);
   } else {
