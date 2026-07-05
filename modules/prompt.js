@@ -147,14 +147,15 @@ export function buildPrompt({ character, roomId }) {
 
   /* --- 每模式回覆字數上限(供未來真實 API 與風格指令使用) --- */
   const maxReplyChars = state.apiConfig?.maxReplyChars?.[room.type]
-    ?? { dm: 800, group: 1200, story: 4000 }[room.type];
+    ?? { dm: 800, group: 1200, story: 4000 }[room.type]
+    ?? 800; // 未知房型防禦:退回 DM 規格,絕不輸出 undefined
 
   /* --- 回覆風格指令 --- */
-  const styleGuide = {
+  const styleGuide = ({
     dm: '風格:私訊。短訊息、自然、口語,像手機上打字。一到兩句即可。以角色第一人稱直接輸出內容,絕對不要在開頭加上自己的名字或「名字:」前綴。',
     group: '風格:群組聊天。自然節奏,不必每人每回合都發言;可補充、吐槽、接話或延後回覆。',
     story: '風格:互動敘事,以小說筆法輸出:場景描述、動作、心理與對話交織。對話用引號呈現,不要用「名字:台詞」的劇本格式,也不要在開頭加名字前綴。',
-  }[room.type]
+  }[room.type] ?? '風格:私訊。短訊息、自然、口語。')
   + (room.type === 'story' && state.settings?.storyFormat?.trim()
     ? ` ${state.settings.storyFormat.trim()}`
     : '');

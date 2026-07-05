@@ -43,7 +43,7 @@ import {
   getPersonas, getPersona, defaultPersona, personaForRoom,
   createPersona, updatePersona, deletePersona, syncPlayerMirror,
 } from './persona.js';
-import { buildPrompt, buildGroupPrompt, buildStoryPrompt } from './prompt.js';
+import { buildPrompt, buildGroupPrompt, buildStoryPrompt, buildPeekPrompt } from './prompt.js';
 import {
   getWorldbooks, getWorldbook, createWorldbook, updateWorldbook, deleteWorldbook,
   addEntry, updateEntry, deleteEntry, parseKeywords,
@@ -2800,9 +2800,12 @@ function renderDevPanel() {
   const room = state.currentRoomId ? getRoom(state.currentRoomId) : null;
   const chars = room ? getRoomCharacters(room) : [];
 
-  let promptPreview = '<div class="panel-empty small">開啟任一對話後,這裡會顯示該角色的 buildPrompt 結果預覽。</div>';
+  let promptPreview = '<div class="panel-empty small">開啟任一對話後,這裡會顯示「實際會送出」的 prompt 預覽(依房型使用對應建構器)。</div>';
   if (room && chars[0]) {
-    const p = buildPrompt({ character: chars[0], roomId: room.id });
+    const p = room.type === 'group' ? buildGroupPrompt({ roomId: room.id })
+      : room.type === 'peek' ? buildPeekPrompt({ roomId: room.id })
+        : room.type === 'story' ? buildStoryPrompt({ roomId: room.id })
+          : buildPrompt({ character: chars[0], roomId: room.id });
     promptPreview = `<pre class="prompt-preview">${esc(p.system)}</pre>`;
   }
 
@@ -3596,6 +3599,7 @@ function openPromptInspectModal(room) {
   const chars = getRoomCharacters(room);
   let built;
   if (room.type === 'group') built = buildGroupPrompt({ roomId: room.id });
+  else if (room.type === 'peek') built = buildPeekPrompt({ roomId: room.id });
   else if (room.type === 'story') built = buildStoryPrompt({ roomId: room.id });
   else built = buildPrompt({ character: chars[0], roomId: room.id });
 
