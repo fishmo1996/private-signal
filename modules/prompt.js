@@ -441,6 +441,20 @@ export function buildStoryPrompt({ roomId }) {
     + '允許引入未事先定義的路人與臨時 NPC(店員、路人、司機等),自然登場即可;但不要替不在場的既有角色代言。'
     + (state.settings?.storyFormat?.trim() ? ` ${state.settings.storyFormat.trim()}` : '');
 
+  // 內建導演指令:英文寫(省 token、服從度佳),單/多人自動切換配方;
+  // 使用者的 storyFormat 與作者備註排在其後,永遠優先。
+  const directorCommon = 'Anchor the passage in one concrete sensory detail (touch, sound, scent): establish it early, return to it at the end.'
+    + ' Never write lazy summary lines like 「他沉默了」or「一陣停頓」— render silence and pauses through concrete description.'
+    + " Stay strictly in the player's POV; describe only what they can perceive."
+    + ' Dialogue in natural Taiwanese Mandarin. Write roughly 1000–2000 Chinese characters per reply; unfold the scene patiently, do not rush the plot or wrap up early.'
+    + ' Always write the story itself in Traditional Chinese (Taiwan).';
+  const director = state.settings?.storyDirector !== false
+    ? `【Scene Direction】${participants.length >= 2
+      ? 'Before writing, silently assign each present character ONE distinct reaction mode for this beat (e.g. one reacts physically, one retorts, one deflects with humor) — never let two characters respond the same way to the same thing. '
+      : 'Only one character is present: go deep, not wide. For each beat, render both the surface reaction AND what stays unspoken — what gestures leak, what the tone hides; the drama lives in that gap. Keep the camera close: micro-expressions, small movements, the charged space between the two of them. '
+    }${directorCommon}`
+    : '';
+
   const system = [
     ...globalPromptSection(roomId),
     `你是互動小說的說書人,負責「${room.title}」這個場景。`,
@@ -453,6 +467,7 @@ export function buildStoryPrompt({ roomId }) {
     `【世界書(依關鍵字觸發)】\n${loreText}`,
     ...(participants.every((c) => c.noPhone) ? [] : [`【最近的社群動態(公開;僅供了解角色近況,其發文時間與正文的劇情時間無關)】\n${recentFeedText(state)}`]),
     `【回覆指令】${styleGuide} ${choiceGuide} 單次輸出長度上限約 ${maxReplyChars} 字。`,
+    ...(director ? [director] : []),
     ...(room.authorNote?.trim()
       ? [`【作者備註(當前對話的最高優先指令,凌駕以上所有設定)】${room.authorNote.trim()}`]
       : []),

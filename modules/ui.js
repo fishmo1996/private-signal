@@ -2421,6 +2421,10 @@ function renderSettings() {
         <input type="checkbox" id="chkMoodEmoji" ${state.settings.moodEmoji !== false ? 'checked' : ''}>
       </label>
       <label class="setting-row">
+        <span class="setting-label">內建正文導演指令<br><span class="setting-hint">場景敘事自動帶導演配方:多人=反應分工不撞戲,單人=內外落差深描;含感官錨點、長度地板(英文注入省 token,輸出仍為繁中)</span></span>
+        <input type="checkbox" id="chkStoryDirector" ${state.settings.storyDirector !== false ? 'checked' : ''}>
+      </label>
+      <label class="setting-row">
         <span class="setting-label">私訊聊天感<br><span class="setting-hint">回覆拆成 1~3 則短訊、口語化、壓掉小說式旁白(匯入卡的旁白腔靠這個治)</span></span>
         <input type="checkbox" id="chkChatFeel" ${state.settings.chatFeel !== false ? 'checked' : ''}>
       </label>
@@ -2636,6 +2640,10 @@ function renderSettings() {
     state.settings.moodEmoji = e.target.checked;
     await persist();
     renderAll();
+  });
+  els.phoneScreen.querySelector('#chkStoryDirector').addEventListener('change', async (e) => {
+    state.settings.storyDirector = e.target.checked;
+    await persist();
   });
   els.phoneScreen.querySelector('#chkChatFeel').addEventListener('change', async (e) => {
     state.settings.chatFeel = e.target.checked;

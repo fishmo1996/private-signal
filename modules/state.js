@@ -75,6 +75,7 @@ function migrate(s) {
   if (s.settings.showStatusCard === undefined) s.settings.showStatusCard = true;
   if (s.settings.chatFeel === undefined) s.settings.chatFeel = true;   // DM 聊天感:1~3 則短訊、口語、去旁白
   if (s.settings.moodEmoji === undefined) s.settings.moodEmoji = true; // DM 標題列的角色當下心情小表情
+  if (s.settings.storyDirector === undefined) s.settings.storyDirector = true; // 內建正文導演指令(單/多人自動切換,英文省 token)
   for (const ps of s.personas || []) {
     if (ps.label === undefined) ps.label = '';
   }
