@@ -8,5 +8,6 @@
   "defaultSettings": {
     "showTimestamps": true,
     "defaultTheme": "mist"
-  }
+  },
+  "version": "v39"
 }

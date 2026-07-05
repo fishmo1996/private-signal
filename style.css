@@ -1662,3 +1662,60 @@ body.theme-berry .bubble.user-bubble { background: color-mix(in srgb, var(--acce
 .voice-sliders { display: flex; gap: 10px; align-items: flex-end; }
 .voice-sliders .field { flex: 1; }
 .voice-sliders .mini-btn { margin-bottom: 8px; }
+
+/* 正文場景狀態列 */
+.status-bar-card {
+  display: block;
+  width: calc(100% - 28px);
+  margin: 6px 14px 0;
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  background: color-mix(in srgb, var(--accent) 7%, var(--glass));
+  color: var(--ink-dim);
+  font-size: calc(11.5px * var(--fs-mult));
+  text-align: left;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.status-bar-card.empty { border-style: dashed; opacity: 0.7; }
+
+/* 甜莓:淺色面板覆寫(管理面板/modal/輸入區——修「深底淡字看不清」) */
+body.theme-berry .modal { background: #fdf2f4; }
+body.theme-berry .modal-backdrop { background: rgba(170, 110, 130, 0.32); }
+body.theme-berry .panel { background: rgba(253, 243, 246, 0.94); }
+body.theme-berry .tabbar { background: rgba(255, 252, 253, 0.65); }
+body.theme-berry .field input,
+body.theme-berry .field textarea,
+body.theme-berry .field select,
+body.theme-berry .theme-select,
+body.theme-berry .mem-edit,
+body.theme-berry .prompt-preview { background: rgba(255, 255, 255, 0.75); }
+body.theme-berry .composer textarea { background: rgba(255, 255, 255, 0.8); }
+body.theme-berry .msg-narrator { background: rgba(255, 255, 255, 0.6); }
+body.theme-berry .char-bubble { background: rgba(255, 252, 253, 0.85); }
+body.theme-berry .avatar.player { color: #ffffff; }
+
+.persona-label { font-size: 11px; color: var(--ink-faint); font-weight: normal; }
+
+/* 章節回翻 */
+.chapter-scroll { max-height: 46vh; overflow-y: auto; padding-right: 4px; }
+.chapter-line {
+  font-size: calc(12.5px * var(--fs-mult));
+  color: var(--ink-dim);
+  line-height: 1.7;
+  margin-bottom: 8px;
+}
+.chapter-line b { color: var(--ink); font-weight: 600; }
+
+/* 旁觀群 */
+.peek-bar {
+  margin: 8px 14px 12px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 6%, var(--glass));
+  color: var(--ink-dim);
+  font-size: calc(11.5px * var(--fs-mult));
+  text-align: center;
+}

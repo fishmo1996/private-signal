@@ -73,6 +73,11 @@ function migrate(s) {
   if (s.settings.globalPrompt === undefined) s.settings.globalPrompt = '';
   if (!s.settings.fontScale) s.settings.fontScale = 'normal';
   if (s.settings.showStatusCard === undefined) s.settings.showStatusCard = true;
+  if (s.settings.chatFeel === undefined) s.settings.chatFeel = true;   // DM 聊天感:1~3 則短訊、口語、去旁白
+  if (s.settings.moodEmoji === undefined) s.settings.moodEmoji = true; // DM 標題列的角色當下心情小表情
+  for (const ps of s.personas || []) {
+    if (ps.label === undefined) ps.label = '';
+  }
   if (!s.settings.appIcons || typeof s.settings.appIcons !== 'object') s.settings.appIcons = {}; // {appId: dataURL} 自訂圖示包
   if (!Array.isArray(s.settings.quickReplies)) s.settings.quickReplies = ['繼續', '(描寫得更細一點)'];
   if (!Array.isArray(s.settings.outputRules)) s.settings.outputRules = [];
@@ -89,6 +94,9 @@ function migrate(s) {
   if (s.chatLastRefresh === undefined) s.chatLastRefresh = 0;
   for (const r of s.rooms || []) {
     if (!r.styleOverrides) r.styleOverrides = {};
+    if (r.statusBar === undefined) r.statusBar = '';
+    if (r.type === 'story' && !Array.isArray(r.archivedChapters)) r.archivedChapters = [];
+    if (r.type === 'story' && r.chapterCount === undefined) r.chapterCount = 0;
   }
   if (s.settings.storyChoices === undefined) s.settings.storyChoices = true;
   if (s.diaryLastRefresh === undefined) s.diaryLastRefresh = 0;
@@ -176,7 +184,7 @@ function migrate(s) {
   }
   // 防禦:任何無法辨識的頁面值,一律安全退回主畫面(只改頁面指標,不動資料)
   const KNOWN_VIEWS = [
-    'home', 'chat-friends', 'chat-rooms', 'chat-room', 'social-feed', 'social-post',
+    'home', 'chat-friends', 'chat-rooms', 'chat-peek', 'chat-room', 'social-feed', 'social-post',
     'story-list', 'story-room', 'people', 'people-character', 'settings',
     'worldbook', 'worldbook-detail', 'character-diary', 'player', 'album', 'search',
   ];

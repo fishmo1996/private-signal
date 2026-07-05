@@ -57,3 +57,25 @@ export function albumTextFor(characterId, limit = 6) {
     .map((p) => `- ${p.dateText ? `${p.dateText},` : ''}${p.caption}`)
     .join('\n');
 }
+
+/**
+ * 紀念日偵測:dateText 含「YYYY/M/D」或「M/D」且月日=今天 → 回傳提示句。
+ * 給某角色的 DM prompt 用;沒有就 ''。
+ */
+export function anniversaryTextFor(characterId) {
+  const today = new Date();
+  const tm = today.getMonth() + 1;
+  const td = today.getDate();
+  const hits = [];
+  for (const p of getPhotos()) {
+    if (!p.characterIds.includes(characterId) || !p.dateText) continue;
+    const m = p.dateText.match(/(?:(\d{4})[\/.年-])?(\d{1,2})[\/.月-](\d{1,2})/);
+    if (!m) continue;
+    const [, y, mo, d] = m;
+    if (Number(mo) === tm && Number(d) === td) {
+      const years = y ? today.getFullYear() - Number(y) : null;
+      hits.push(`今天是「${p.caption}」的日子${years ? `(${years} 週年)` : '(同月同日)'}`);
+    }
+  }
+  return hits.slice(0, 2).join(';');
+}

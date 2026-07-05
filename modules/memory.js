@@ -184,7 +184,7 @@ export async function generateSummaryCandidates(roomId) {
   const { getApiConfig, generateReply } = await import('./api.js');
   const cfg = getApiConfig();
   if (!(cfg.useRealApi && cfg.apiKey && cfg.model)) {
-    const items = [...msgs].sort((a, b) => b.content.length - a.content.length)
+    const items = [...msgs].sort((a, b) => (b.content || '').length - (a.content || '').length)
       .slice(0, 4)
       .map((m) => m.content.replace(/\s+/g, ' ').slice(0, 50));
     return { ok: true, items };
@@ -212,4 +212,50 @@ export async function commitSummary(roomId, savedCount) {
   if (room && msgs.length) room.summarizedUpTo = msgs[msgs.length - 1].createdAt;
   await persist();
   return savedCount;
+}
+
+/* ------------------------------------------------------------
+ * 正文章節封存:摘要整章 → 存進場景記憶 → 清空對話重新開始。
+ * 舊章完整訊息存進 room.archivedChapters,可回翻、隨備份攜帶。
+ * ------------------------------------------------------------ */
+
+export async function archiveChapter(roomId, { title = '' } = {}) {
+  const state = getState();
+  const room = state.rooms.find((r) => r.id === roomId);
+  if (!room || room.type !== 'story') return { ok: false, message: '只有正文場景可以封存章節' };
+  const msgs = state.messagesByRoom[roomId] || [];
+  if (msgs.length < 4) return { ok: false, message: '本章還太短(不足 4 則),再跑一段吧' };
+
+  // 1) 摘要(真實 API 或 mock 都走既有摘要管線)
+  const r = await generateSummaryCandidates(roomId);
+  if (!r.ok) return r;
+  const n = (room.chapterCount || 0) + 1;
+  const chapterTitle = String(title || '').trim() || `第 ${n} 章`;
+  const summaryBody = r.items.map((it) => `- ${typeof it === 'string' ? it : it.content}`).join('\n');
+
+  // 2) 摘要存成場景記憶(下一章的說書人會記得前情)
+  if (!state.memories.byRoomId[roomId]) state.memories.byRoomId[roomId] = [];
+  state.memories.byRoomId[roomId].push({
+    id: genId('mem'),
+    content: `【${chapterTitle}|前情】\n${summaryBody}`,
+    visibility: 'room',
+    pinned: false,
+    sourceRoomId: roomId,
+    createdAt: Date.now(),
+  });
+
+  // 3) 整章原文封存,清空當前對話
+  if (!Array.isArray(room.archivedChapters)) room.archivedChapters = [];
+  room.archivedChapters.push({
+    n,
+    title: chapterTitle,
+    messages: msgs,
+    archivedAt: Date.now(),
+  });
+  room.chapterCount = n;
+  state.messagesByRoom[roomId] = [];
+  room.summarizedUpTo = 0;
+
+  await persist();
+  return { ok: true, n, title: chapterTitle, summaryCount: r.items.length };
 }

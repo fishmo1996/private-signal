@@ -96,6 +96,14 @@ export function stopSpeaking() {
   onStateChange();
 }
 
+/** 從 AI 輸出尾端偵測「[心情:x]」標記:回傳 {content, mood}。 */
+export function extractMoodTag(text) {
+  const t = String(text || '');
+  const m = t.match(/\n?\s*(?:\[|【)心情[::]\s*(\S{1,4}?)\s*(?:\]|】)\s*$/);
+  if (m) return { content: t.slice(0, m.index).trim(), mood: m[1] };
+  return { content: t, mood: null };
+}
+
 /** 從 AI 輸出偵測「[語音]」標記:回傳 {content, voice}。 */
 export function extractVoiceTag(text) {
   const t = String(text || '');

@@ -70,7 +70,8 @@ export function parentView() {
   switch (view) {
     case 'chat-room': {
       const room = state.currentRoomId ? getRoom(state.currentRoomId) : null;
-      return room && room.type === 'group' ? 'chat-rooms' : 'chat-friends';
+      return room && room.type === 'peek' ? 'chat-peek'
+        : room && room.type === 'group' ? 'chat-rooms' : 'chat-friends';
     }
     case 'story-room': return 'story-list';
     case 'social-post': return 'social-feed';
@@ -80,6 +81,7 @@ export function parentView() {
     case 'search': return 'chat-friends';
     case 'chat-friends':
     case 'chat-rooms':
+    case 'chat-peek':
     case 'social-feed':
     case 'story-list':
     case 'people':

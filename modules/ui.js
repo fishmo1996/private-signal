@@ -14,11 +14,10 @@ import {
   createGroup, createStory, deleteRoom,
   findDmRoom, openRoom,
 } from './rooms.js';
-import { sendUserMessage, isRoomBusy, editMessage, deleteMessage, regenerateLastReply, refreshChats } from './chat.js';
-import { addRoomMember, removeRoomMember } from './rooms.js';
+import { sendUserMessage, isRoomBusy, editMessage, deleteMessage, regenerateLastReply, refreshChats , selfChat } from './chat.js';
+import { addRoomMember, removeRoomMember, createPeek } from './rooms.js';
 import {
-  createMemoryCandidate, addMemory, editMemory, togglePin, deleteMemory,
-  generateSummaryCandidates, commitSummary,
+  createMemoryCandidate, addMemory, editMemory, togglePin, deleteMemory, generateSummaryCandidates, commitSummary, archiveChapter, messagesSinceSummary,
 } from './memory.js';
 import {
   getPosts, getPost, getComments, createPost, addComment, toggleLike,
@@ -33,7 +32,6 @@ import { compressAvatar, compressBackground, compressPhoto } from './image.js';
 import { getDiaries, generateDiary, deleteDiary } from './diary.js';
 import { getPhotos, addPhoto, updatePhoto, deletePhoto } from './album.js';
 import { searchAll } from './search.js';
-import { messagesSinceSummary } from './memory.js';
 import {
   ttsAvailable, listChineseVoices, toggleSpeak, speakingMessageKey,
   setVoiceStateListener, estimateSeconds, setCharacterVoice,
@@ -147,6 +145,7 @@ function appHeader(title, { rightHtml = '', subtitle = '', leadingHtml = '' } = 
   const BACK_LABELS = {
     home: '主畫面',
     'chat-friends': '聊天',
+    'chat-peek': '聊天',
     'chat-rooms': '聊天',
     'social-feed': '社群',
     'story-list': '正文',
@@ -246,6 +245,7 @@ function renderPhone() {
     case 'home': renderHome(); break;
     case 'chat-friends': renderChatApp('friends'); break;
     case 'chat-rooms': renderChatApp('rooms'); break;
+    case 'chat-peek': renderChatApp('peek'); break;
     case 'chat-room': renderRoomView(); break;
     case 'social-feed': renderSocialFeed(); break;
     case 'social-post': renderSocialPost(); break;
@@ -338,9 +338,11 @@ function renderChatApp(tab) {
     ? '<button class="header-action" id="btnGlobalSearch">🔍</button>'
       + '<button class="header-action" id="btnChatRefresh">↻</button>'
       + '<button class="header-action" id="btnHeaderAdd">＋ 新增角色</button>'
-    : '<button class="header-action" id="btnHeaderAdd">＋ 建立聊天室</button>';
+    : (tab === 'peek'
+      ? '<button class="header-action" id="btnHeaderAdd">＋ 建立旁觀群</button>'
+      : '<button class="header-action" id="btnHeaderAdd">＋ 建立聊天室</button>');
 
-  const listHtml = tab === 'friends' ? friendRowsHtml() : groupRowsHtml();
+  const listHtml = tab === 'friends' ? friendRowsHtml() : (tab === 'peek' ? peekRowsHtml() : groupRowsHtml());
 
   els.phoneScreen.innerHTML = `
     ${appHeader('聊天', { rightHtml })}
@@ -353,6 +355,9 @@ function renderChatApp(tab) {
       <button class="tabbar-item ${tab === 'rooms' ? 'active' : ''}" data-tab="chat-rooms" role="tab" aria-selected="${tab === 'rooms'}">
         <span class="tabbar-glyph" aria-hidden="true">◍</span>聊天室
       </button>
+      <button class="tabbar-item ${tab === 'peek' ? 'active' : ''}" data-tab="chat-peek" role="tab" aria-selected="${tab === 'peek'}">
+        <span class="tabbar-glyph" aria-hidden="true">👁</span>旁觀
+      </button>
     </div>`;
 
   bindBack();
@@ -364,6 +369,7 @@ function renderChatApp(tab) {
   });
   els.phoneScreen.querySelector('#btnHeaderAdd').addEventListener('click', () => {
     if (tab === 'friends') openCharacterModal({ openDmAfter: true });
+    else if (tab === 'peek') openPeekModal();
     else openGroupModal();
   });
   const searchBtn = els.phoneScreen.querySelector('#btnGlobalSearch');
@@ -424,12 +430,70 @@ function friendRowsHtml() {
       <button class="list-row" data-open-room="${esc(dm.id)}">
         ${avatarHtml(c)}
         <span class="list-main">
-          <span class="list-title">${esc(c.name)}${dm.unread ? ' <span class="unread-dot" aria-label="未讀"></span>' : ''}</span>
+          <span class="list-title">${esc(c.name)}${getState().settings.moodEmoji !== false && dm.mood?.emoji ? ` ${dm.mood.emoji}` : ''}${dm.unread ? ' <span class="unread-dot" aria-label="未讀"></span>' : ''}</span>
           <span class="list-preview">${esc(preview)}</span>
         </span>
         ${last ? `<span class="list-time">${fmtTime(last.createdAt)}</span>` : ''}
       </button>`;
   }).join('');
+}
+
+/** 旁觀分頁:角色們自己的群組,你只能偷看。 */
+function peekRowsHtml() {
+  const state = getState();
+  const peeks = state.rooms.filter((r) => r.type === 'peek');
+  if (!peeks.length) {
+    return `<div class="list-empty">還沒有旁觀群。<br>建一個「你不在裡面」的群,按 ↻ 偷看他們聊什麼。</div>`;
+  }
+  return peeks.map((r) => {
+    const last = (state.messagesByRoom[r.id] || []).slice(-1)[0];
+    const preview = last ? firstLine(last.content, 26) : '(還沒人開口——按 ↻ 讓他們聊起來)';
+    return `
+      <button class="list-row" data-open-room="${esc(r.id)}">
+        <span class="avatar sm neutral" aria-hidden="true">👁</span>
+        <span class="list-main">
+          <span class="list-title">${esc(r.title)}</span>
+          <span class="list-preview">${esc(preview)}</span>
+        </span>
+        ${last ? `<span class="list-time">${fmtTime(last.createdAt)}</span>` : ''}
+      </button>`;
+  }).join('');
+}
+
+/** 建立旁觀群 modal。 */
+function openPeekModal() {
+  const state = getState();
+  if (state.characters.length < 2) {
+    openModal('<h3>建立旁觀群</h3><p class="panel-note">至少需要兩個角色。</p>');
+    return;
+  }
+  openModal(`
+    <h3>建立旁觀群</h3>
+    <p class="panel-note">你不在這個群裡:他們用共同知道的事聊天(公開資訊+共享記憶+彼此關係),按 ↻ 讓他們聊起來,你只能看。任何人的私訊祕密不會出現在這裡。</p>
+    <form id="peekForm">
+      <label class="field">群組名稱
+        <input name="title" required maxlength="30" placeholder="例:三缺一(沒有你)">
+      </label>
+      <div class="field-label">成員(至少 2 位):</div>
+      <div class="check-list">
+        ${state.characters.map((c) => `
+          <label class="check-field"><input type="checkbox" name="pm" value="${esc(c.id)}"> ${esc(c.name)}</label>`).join('')}
+      </div>
+      <div class="form-actions"><button type="submit" class="primary-btn slim">建立</button></div>
+    </form>`, {
+    onOpen(root) {
+      root.querySelector('#peekForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const ids = [...root.querySelectorAll('input[name="pm"]:checked')].map((i) => i.value);
+        if (ids.length < 2) { alert('至少勾選兩位'); return; }
+        const title = String(new FormData(e.target).get('title'));
+        closeModal();
+        const room = await createPeek(title, ids);
+        await openRoom(room.id);
+        renderAll();
+      });
+    },
+  });
 }
 
 /** 聊天室分頁:群聊列表。 */
@@ -478,17 +542,24 @@ function renderRoomView() {
   const deletable = room.type !== 'dm';
 
   els.phoneScreen.innerHTML = `
-    ${appHeader(room.title, {
+    ${appHeader(room.type === 'dm' && getState().settings.moodEmoji !== false && room.mood?.emoji ? `${room.title} ${room.mood.emoji}` : room.title, {
       subtitle: statusText,
       leadingHtml: isStory ? '<span class="avatar sm neutral" aria-hidden="true">❖</span>' : avatarHtml(chars[0], 'sm'),
       rightHtml: (room.type === 'dm' ? '<button class="header-action" id="btnRoomDiary">日記</button>'
-        : (room.type === 'group' ? '<button class="header-action" id="btnSelfChat">↻</button>' : '')
+        : ((room.type === 'group' || room.type === 'peek') ? '<button class="header-action" id="btnSelfChat">↻</button>' : '')
           + '<button class="header-action" id="btnRoomMembers">成員</button>')
         + `<button class="header-action" id="btnRoomMemory">記憶${messagesSinceSummary(room.id).length >= 30 ? '<span class="unread-dot" aria-label="建議摘要"></span>' : ''}</button>`
         + `<button class="header-action" id="btnAuthorNote">備註${room.authorNote?.trim() ? '●' : ''}</button>`
         + (deletable ? '<button class="icon-btn" id="btnDeleteRoom" aria-label="刪除">✕</button>' : ''),
     })}
     <div class="messages ${isStory ? 'story-mode' : ''}" id="messages" aria-live="polite"></div>
+    ${room.type === 'story' ? `
+      <button class="status-bar-card ${room.statusBar?.trim() ? '' : 'empty'}" id="btnStatusBar" aria-label="編輯場景狀態">
+        ${room.statusBar?.trim() ? esc(room.statusBar) : '⊕ 設定場景狀態(時間/地點/衣著…)'}
+      </button>` : ''}
+    ${room.type === 'peek' ? `
+      <div class="peek-bar">👁 你在偷看——他們不知道你看得到。按右上 ↻ 讓他們聊起來。</div>`
+    : `
     ${(getState().settings.quickReplies || []).length ? `
       <div class="quick-replies">
         ${getState().settings.quickReplies.map((q, i) => `<button class="mini-btn" data-quick="${i}">${esc(q)}</button>`).join('')}
@@ -507,15 +578,35 @@ function renderRoomView() {
         placeholder="${isStory ? '輸入台詞、行動或敘事…' : '輸入訊息…'}"
         aria-label="訊息輸入框"></textarea>
       <button class="send-btn" id="btnSend" aria-label="送出訊息">送出</button>
-    </div>`;
+    </div>`}`;
 
   bindBack();
   els.phoneScreen.querySelector('#btnAuthorNote').addEventListener('click', () => openAuthorNoteModal(room));
   els.phoneScreen.querySelector('#btnRoomMemory').addEventListener('click', () => openRoomMemoryModal(room));
+  const statusBarBtn = els.phoneScreen.querySelector('#btnStatusBar');
+  if (statusBarBtn) {
+    statusBarBtn.addEventListener('click', () => {
+      openModal(`
+        <h3>場景狀態</h3>
+        <p class="panel-note">會置頂進入說書人 prompt(「以此為準」),劇情時間、地點、衣著、天氣都寫這裡;隨劇情推進隨手更新。</p>
+        <textarea id="statusBarBox" rows="3" maxlength="300" placeholder="八月十二日 傍晚/海邊民宿的露台/阿莫:白色洋裝,頭髮還是濕的">${esc(room.statusBar || '')}</textarea>
+        <div class="form-actions"><button class="primary-btn slim" id="btnStatusBarSave">儲存</button></div>`, {
+        onOpen(root) {
+          root.querySelector('#btnStatusBarSave').addEventListener('click', async () => {
+            room.statusBar = root.querySelector('#statusBarBox').value.trim();
+            await persist();
+            closeModal();
+            renderPhone();
+          });
+        },
+      });
+    });
+  }
   const selfChatBtn = els.phoneScreen.querySelector('#btnSelfChat');
   if (selfChatBtn) {
     selfChatBtn.addEventListener('click', async () => {
       selfChatBtn.disabled = true;
+      try {
       const r = await selfChat(room.id, (info) => {
         typingBy = info.typingBy ?? typingBy;
         if (getState().currentRoomId === room.id) renderMessages();
@@ -524,6 +615,9 @@ function renderRoomView() {
       if (getState().currentRoomId !== room.id) return;
       renderMessages();
       if (!r.ok && r.message) alert(r.message);
+      } catch (err) {
+        alert(`刷新出錯:${err.message}(請把這段訊息回報)`);
+      }
       const btn2 = els.phoneScreen.querySelector('#btnSelfChat');
       if (btn2) btn2.disabled = false;
     });
@@ -559,7 +653,7 @@ function renderRoomView() {
   const input = els.phoneScreen.querySelector('#composerInput');
   const sendBtn = els.phoneScreen.querySelector('#btnSend');
 
-  els.phoneScreen.querySelector('#btnRoomPersona').addEventListener('click', () => {
+  els.phoneScreen.querySelector('#btnRoomPersona')?.addEventListener('click', () => {
     openPersonaSelectModal({
       title: `這個對話中,你是誰?`,
       current: room.personaId,
@@ -575,8 +669,8 @@ function renderRoomView() {
   let pendingImage = null;
   const attachFile = els.phoneScreen.querySelector('#attachFile');
   const attachPreview = els.phoneScreen.querySelector('#attachPreview');
-  els.phoneScreen.querySelector('#btnAttach').addEventListener('click', () => attachFile.click());
-  attachFile.addEventListener('change', async () => {
+  els.phoneScreen.querySelector('#btnAttach')?.addEventListener('click', () => attachFile.click());
+  if (attachFile) attachFile.addEventListener('change', async () => {
     const file = attachFile.files[0];
     if (!file) return;
     try {
@@ -586,12 +680,13 @@ function renderRoomView() {
     } catch (err) { alert(err.message); }
     attachFile.value = '';
   });
-  els.phoneScreen.querySelector('#btnAttachClear').addEventListener('click', () => {
+  els.phoneScreen.querySelector('#btnAttachClear')?.addEventListener('click', () => {
     pendingImage = null;
     attachPreview.hidden = true;
   });
 
   const doSend = async () => {
+    if (!input) return;
     const text = input.value;
     if ((!text.trim() && !pendingImage) || isRoomBusy(room.id)) return;
     const image = pendingImage;
@@ -611,48 +706,34 @@ function renderRoomView() {
     if (getState().currentRoomId === room.id) renderMessages();
   };
 
-  sendBtn.addEventListener('click', doSend);
-  els.phoneScreen.querySelectorAll('[data-choice]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const last = getRoomMessages(room.id).slice(-1)[0];
-      const choice = last?.choices?.[Number(btn.dataset.choice)];
-      if (!choice) return;
-      input.value = choice;
-      doSend();
-    });
-  });
-  const charVoiceOf = (m2) => {
-    const ch = m2.senderId !== 'player' && m2.senderId !== 'system' ? getCharacter(m2.senderId) : null;
-    return ch?.voice || {};
-  };
-  els.phoneScreen.querySelectorAll('[data-speak]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const m2 = getRoomMessages(room.id).find((x) => x.id === btn.dataset.speak);
-      if (m2) toggleSpeak(m2.id, m2.content, charVoiceOf(m2));
-    });
-  });
-  els.phoneScreen.querySelectorAll('[data-speak-note]').forEach((el) => {
-    el.addEventListener('click', () => {
-      const m2 = getRoomMessages(room.id).find((x) => x.id === el.dataset.speakNote);
-      if (m2) toggleSpeak(m2.id, m2.content, charVoiceOf(m2));
-    });
-  });
+  if (sendBtn) sendBtn.addEventListener('click', doSend);
   els.phoneScreen.querySelectorAll('[data-quick]').forEach((btn) => {
     btn.addEventListener('click', () => {
       input.value = getState().settings.quickReplies[Number(btn.dataset.quick)] || '';
       doSend();
     });
   });
-  input.addEventListener('keydown', (e) => {
+  if (input) input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       doSend();
     }
   });
-  input.focus();
+  if (input) input.focus();
 
   renderMessages();
 }
+
+/** 訊息視窗切片:只渲染最近 count 則(長對話效能)。 */
+export function windowMessages(all, count) {
+  const n = Math.max(0, all.length - Math.max(1, count));
+  return { msgs: all.slice(n), hiddenCount: n };
+}
+
+const MSG_WINDOW_INIT = 60;
+let pendingScrollAnchor = null;
+const MSG_WINDOW_STEP = 80;
+let msgWindow = { roomId: null, count: MSG_WINDOW_INIT };
 
 function renderMessages() {
   const state = getState();
@@ -660,12 +741,17 @@ function renderMessages() {
   if (!wrap || !state.currentRoomId) return;
   const room = getRoom(state.currentRoomId);
   if (!room) return;
-  const msgs = getRoomMessages(room.id);
+  if (msgWindow.roomId !== room.id) msgWindow = { roomId: room.id, count: MSG_WINDOW_INIT };
+  const allMsgs = getRoomMessages(room.id);
+  const { msgs, hiddenCount } = windowMessages(allMsgs, msgWindow.count);
+  const loadOlderHtml = hiddenCount > 0
+    ? `<div class="load-older-wrap"><button class="ghost-btn slim" id="btnLoadOlder">↑ 載入更早的 ${Math.min(MSG_WINDOW_STEP, hiddenCount)} 則(還有 ${hiddenCount} 則)</button></div>`
+    : '';
   const showTime = state.settings.showTimestamps !== false;
 
   const html = msgs.map((m, i) => {
     const time = showTime ? `<span class="msg-time">${fmtTime(m.createdAt)}</span>` : '';
-    const isLast = i === msgs.length - 1;
+    const isLast = i === msgs.length - 1; // 視窗永遠含最新一則,尾=全量尾
     const speakBtn = (m.role === 'character' || m.role === 'narrator') && ttsAvailable()
       ? `<button class="remember-btn" data-speak="${esc(m.id)}" aria-label="朗讀">${speakingMessageKey() === m.id ? '■' : '▶'}</button>`
       : '';
@@ -727,15 +813,30 @@ function renderMessages() {
     : '';
 
   const canRegen = !typingBy
-    && msgs.some((m) => m.role === 'user')
-    && msgs.length && msgs[msgs.length - 1].role !== 'user'
+    && allMsgs.some((m) => m.role === 'user')
+    && allMsgs.length && allMsgs[allMsgs.length - 1].role !== 'user'
     && !isRoomBusy(room.id);
   const regenBtn = canRegen
     ? '<div class="regen-wrap"><button class="regen-btn" id="btnRegen">↻ 重新生成</button></div>'
     : '';
 
-  wrap.innerHTML = html + typing + regenBtn;
-  wrap.scrollTop = wrap.scrollHeight;
+  wrap.innerHTML = loadOlderHtml + html + typing + regenBtn;
+  if (pendingScrollAnchor !== null) {
+    // 剛載入更早的訊息:維持原本閱讀位置(新高度差補回去)
+    wrap.scrollTop = wrap.scrollHeight - pendingScrollAnchor;
+    pendingScrollAnchor = null;
+  } else {
+    wrap.scrollTop = wrap.scrollHeight;
+  }
+
+  const loadOlder = wrap.querySelector('#btnLoadOlder');
+  if (loadOlder) {
+    loadOlder.addEventListener('click', () => {
+      pendingScrollAnchor = wrap.scrollHeight - wrap.scrollTop;
+      msgWindow.count += MSG_WINDOW_STEP;
+      renderMessages();
+    });
+  }
 
   const regen = wrap.querySelector('#btnRegen');
   if (regen) {
@@ -751,6 +852,36 @@ function renderMessages() {
     });
   }
 
+  const notifyHere = (info) => {
+    typingBy = info.typingBy ?? typingBy;
+    if (getState().currentRoomId === room.id) renderMessages();
+  };
+  const charVoiceOf = (m2) => {
+    const ch = m2.senderId !== 'player' && m2.senderId !== 'system' ? getCharacter(m2.senderId) : null;
+    return ch?.voice || {};
+  };
+  wrap.querySelectorAll('[data-choice]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const lastM = allMsgs[allMsgs.length - 1];
+      const choice = lastM?.choices?.[Number(btn.dataset.choice)];
+      if (!choice || isRoomBusy(room.id)) return;
+      await sendUserMessage(room.id, choice, notifyHere);
+      typingBy = '';
+      if (getState().currentRoomId === room.id) renderMessages();
+    });
+  });
+  wrap.querySelectorAll('[data-speak]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const m2 = allMsgs.find((x) => x.id === btn.dataset.speak);
+      if (m2) toggleSpeak(m2.id, m2.content, charVoiceOf(m2));
+    });
+  });
+  wrap.querySelectorAll('[data-speak-note]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const m2 = allMsgs.find((x) => x.id === el.dataset.speakNote);
+      if (m2) toggleSpeak(m2.id, m2.content, charVoiceOf(m2));
+    });
+  });
   wrap.querySelectorAll('[data-remember]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const msg = msgs.find((m) => m.id === btn.dataset.remember);
@@ -1101,7 +1232,7 @@ function renderSocialPost() {
       doComment();
     }
   });
-  input.focus();
+  if (input) input.focus();
 
   const detail = els.phoneScreen.querySelector('#postDetail');
   detail.scrollTop = detail.scrollHeight;
@@ -1388,7 +1519,7 @@ function renderPlayer() {
         <button class="profile-card" data-edit-persona="${esc(ps.id)}" aria-label="編輯人設 ${esc(ps.name)}">
           ${personaAvatarHtml(ps)}
           <span class="list-main">
-            <span class="list-title">${esc(ps.name)}${ps.id === state.defaultPersonaId ? '(預設)' : ''}</span>
+            <span class="list-title">${esc(ps.name)}${ps.label ? ` <span class="persona-label">— ${esc(ps.label)}</span>` : ''}${ps.id === state.defaultPersonaId ? '(預設)' : ''}</span>
             <span class="list-preview">${esc(firstLine(ps.description, 24) || '角色眼中的你——點這裡填寫')}</span>
           </span>
           <span class="list-chevron" aria-hidden="true">›</span>
@@ -2255,6 +2386,14 @@ function renderSettings() {
         <input type="checkbox" id="chkStatusCard" ${state.settings.showStatusCard !== false ? 'checked' : ''}>
       </label>
       <label class="setting-row">
+        <span class="setting-label">角色心情小表情<br><span class="setting-hint">DM 標題與好友列顯示他此刻對你的心情(模型每則順手標記)</span></span>
+        <input type="checkbox" id="chkMoodEmoji" ${state.settings.moodEmoji !== false ? 'checked' : ''}>
+      </label>
+      <label class="setting-row">
+        <span class="setting-label">私訊聊天感<br><span class="setting-hint">回覆拆成 1~3 則短訊、口語化、壓掉小說式旁白(匯入卡的旁白腔靠這個治)</span></span>
+        <input type="checkbox" id="chkChatFeel" ${state.settings.chatFeel !== false ? 'checked' : ''}>
+      </label>
+      <label class="setting-row">
         <span class="setting-label">角色會傳語音訊息<br><span class="setting-hint">情緒濃的時刻,他自己決定改用「說的」(聲波條樣式,點了播放;僅支援語音的裝置)</span></span>
         <input type="checkbox" id="chkVoiceTag" ${state.settings.voiceTag !== false ? 'checked' : ''}>
       </label>
@@ -2462,6 +2601,15 @@ function renderSettings() {
     await persist();
     renderAll();
   });
+  els.phoneScreen.querySelector('#chkMoodEmoji').addEventListener('change', async (e) => {
+    state.settings.moodEmoji = e.target.checked;
+    await persist();
+    renderAll();
+  });
+  els.phoneScreen.querySelector('#chkChatFeel').addEventListener('change', async (e) => {
+    state.settings.chatFeel = e.target.checked;
+    await persist();
+  });
   els.phoneScreen.querySelector('#chkVoiceTag').addEventListener('change', async (e) => {
     state.settings.voiceTag = e.target.checked;
     await persist();
@@ -2613,6 +2761,7 @@ function renderMemoryPanel() {
     }).join('');
 
   els.panelBody.innerHTML = `
+    <div class="panel-note">這裡是「總倉庫」:不管你現在開著哪個 App,它都列出全站所有記憶(依歸屬分組)。各對話自己的記憶,主要入口是該對話標題列的「記憶」抽屜。</div>
     <div class="panel-note">在聊天訊息或社群貼文上按「記住」,就能把它變成一條可編輯的記憶。DM 的記憶只有該角色本人看得到。</div>
     <div class="mem-heading">共享記憶(所有角色可見,含社群)</div>
     ${mem.shared.length ? mem.shared.map(memoryItemHtml).join('') : '<div class="panel-empty small">尚無共享記憶</div>'}
@@ -2659,6 +2808,8 @@ function renderDevPanel() {
 
   els.panelBody.innerHTML = `
     <div class="panel-note">這一欄是開發/管理輔助區,不屬於手機本體。</div>
+    <div class="mem-heading">目前版本:${esc(getConfig()?.version || '(未知)')}</div>
+    <div class="panel-note">回報問題時附上這個版本號;若跟最新交付不符=瀏覽器吃到舊快取,請強制重新整理(或 PWA 移除重加)。</div>
     <div class="mem-heading">資料診斷(暫時性)</div>
     <div class="dev-stats">
       database:${esc(diagnostics.dbName)}<br>
@@ -2758,7 +2909,7 @@ function characterFormFields(c = {}) {
     </label>
     <label class="field">這個角色認識的人設(他眼中的「你」)
       <select name="knownPersonaId" class="theme-select" style="width:100%; margin-top:5px">
-        ${getPersonas().map((ps) => `<option value="${esc(ps.id)}" ${(c.knownPersonaId || getState().defaultPersonaId) === ps.id ? 'selected' : ''}>${esc(ps.name)}</option>`).join('')}
+        ${getPersonas().map((ps) => `<option value="${esc(ps.id)}" ${(c.knownPersonaId || getState().defaultPersonaId) === ps.id ? 'selected' : ''}>${esc(ps.name)}${ps.label ? ` — ${esc(ps.label)}` : ''}</option>`).join('')}
       </select>
     </label>
     <div class="field">頭像圖片
@@ -2945,6 +3096,9 @@ function openPersonaModal(persona = null) {
       <label class="field">名字
         <input name="name" required maxlength="40" value="${esc(persona?.name || '')}" placeholder="這個「你」叫什麼?">
       </label>
+      <label class="field">備註標籤(只顯示在你的選單,角色不會讀到——同名人設靠這個分)
+        <input name="label" maxlength="30" value="${esc(persona?.label || '')}" placeholder="例:民國線、現代大學線">
+      </label>
       <label class="field">描述(角色眼中的你)
         <textarea name="description" rows="4" maxlength="4000" data-counter placeholder="例如:19 歲大學生,短髮,講話直接">${esc(persona?.description || '')}</textarea>
         <span class="char-count"></span>
@@ -2965,12 +3119,12 @@ function openPersonaModal(persona = null) {
         const av = getAvatar();
         if (persona) {
           await updatePersona(persona.id, {
-            name: data.name, description: data.description,
+            name: data.name, description: data.description, label: data.label,
             ...(av !== undefined ? { avatarImage: av } : {}),
           });
         } else {
           await createPersona({
-            name: data.name, description: data.description,
+            name: data.name, description: data.description, label: data.label,
             avatarImage: av !== undefined ? av : null,
           });
         }
@@ -3014,7 +3168,7 @@ function openPersonaSelectModal({ title, current, onSelect }) {
         <button class="list-row persona-option ${ps.id === current ? 'active' : ''}" data-pick-persona="${esc(ps.id)}">
           ${personaAvatarHtml(ps)}
           <span class="list-main">
-            <span class="list-title">${esc(ps.name)}</span>
+            <span class="list-title">${esc(ps.name)}${ps.label ? ` <span class="persona-label">— ${esc(ps.label)}</span>` : ''}</span>
             <span class="list-preview">${esc(firstLine(ps.description, 24) || '')}</span>
           </span>
           ${ps.id === current ? '<span class="list-chevron">✓</span>' : ''}
@@ -3038,7 +3192,7 @@ function openNewPostModal() {
     <form id="postForm">
       <label class="field">用哪個身分發?
         <select name="personaId" class="theme-select" style="width:100%; margin-top:5px">
-          ${getPersonas().map((ps) => `<option value="${esc(ps.id)}" ${(getState().activePersonaId || getState().defaultPersonaId) === ps.id ? 'selected' : ''}>${esc(ps.name)}</option>`).join('')}
+          ${getPersonas().map((ps) => `<option value="${esc(ps.id)}" ${(getState().activePersonaId || getState().defaultPersonaId) === ps.id ? 'selected' : ''}>${esc(ps.name)}${ps.label ? ` — ${esc(ps.label)}` : ''}</option>`).join('')}
         </select>
       </label>
       <label class="field">內容
@@ -3221,6 +3375,18 @@ function openRoomMemoryModal(room) {
   }).join('')}
       <button class="mini-btn" id="rmStyleReset">還原全部跟隨全域</button>
     ` : ''}
+    ${room.type === 'story' ? `
+      <div class="mem-heading">章節</div>
+      <div class="panel-note">封存=把本章摘要進場景記憶+清空對話重新開始;原文完整保留可回翻,說書人會記得前情。</div>
+      ${(room.archivedChapters || []).map((ch) => `
+        <button class="list-row" data-open-chapter="${ch.n}">
+          <span class="list-main">
+            <span class="list-title">${esc(ch.title)}</span>
+            <span class="list-preview">${ch.messages.length} 則 · ${fmtTime(ch.archivedAt)}</span>
+          </span><span class="list-chevron">›</span>
+        </button>`).join('')}
+      <button class="ghost-btn slim" id="rmArchiveChapter">✦ 封存本章、開新章</button>
+    ` : ''}
     <div class="mem-heading">本聊天室備份</div>
     <div class="panel-note">單獨打包這條故事線(訊息+場景記憶${'$'}{room.type === 'dm' ? '+這位角色的私密記憶' : ''};不含金鑰與其他對話)。匯入入口在設定 → 資料。</div>
     <button class="ghost-btn slim" id="rmExportRoom">匯出此聊天室</button>
@@ -3278,6 +3444,36 @@ function openRoomMemoryModal(room) {
             rerender();
           });
         }
+        const archBtn = body.querySelector('#rmArchiveChapter');
+        if (archBtn) {
+          archBtn.addEventListener('click', async () => {
+            archBtn.disabled = true;
+            archBtn.textContent = '摘要中…';
+            const r = await archiveChapter(room.id);
+            if (!r.ok) {
+              alert(r.message);
+              archBtn.disabled = false;
+              archBtn.textContent = '✦ 封存本章、開新章';
+              return;
+            }
+            closeModal();
+            renderAll();
+          });
+        }
+        body.querySelectorAll('[data-open-chapter]').forEach((chBtn) => {
+          chBtn.addEventListener('click', () => {
+            const ch = (room.archivedChapters || []).find((x) => String(x.n) === chBtn.dataset.openChapter);
+            if (!ch) return;
+            openModal(`
+              <h3>${esc(ch.title)}</h3>
+              <div class="chapter-scroll">
+                ${ch.messages.map((m2) => {
+    const who = m2.senderId === 'player' ? '你' : m2.senderId === 'system' ? '' : (getCharacter(m2.senderId)?.name || '旁白');
+    return `<div class="chapter-line"><b>${esc(who)}</b>${who ? ':' : ''}${esc(m2.content).replaceAll('\n', '<br>')}</div>`;
+  }).join('')}
+              </div>`);
+          });
+        });
         body.querySelector('#rmExportRoom').addEventListener('click', () => {
           const d = new Date();
           const date = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
@@ -3510,10 +3706,12 @@ function openAuthorNoteModal(room) {
 
 /** 編輯訊息 modal。 */
 function openEditMessageModal(roomId, msg) {
+  const roomType = getRoom(roomId)?.type || 'dm';
+  const editCap = roomType === 'story' ? 20000 : 2000;
   openModal(`
     <h3>編輯訊息</h3>
     <label class="field">內容
-      <textarea id="msgEditBox" rows="5" maxlength="20000" data-counter>${esc(msg.content)}</textarea>
+      <textarea id="msgEditBox" rows="5" maxlength="${editCap}" data-counter>${esc(msg.content)}</textarea>
       <span class="char-count"></span>
     </label>
     <div class="form-actions">

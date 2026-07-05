@@ -86,7 +86,7 @@ export async function deleteCharacter(id) {
     if (room.participantIds.includes(id)) {
       room.participantIds = room.participantIds.filter((p) => p !== id);
       const remaining = room.participantIds.filter((p) => p !== 'player').length;
-      if (room.type === 'group' && remaining < 2) roomsToDelete.push(room.id);
+      if ((room.type === 'group' || room.type === 'peek') && remaining < 2) roomsToDelete.push(room.id);
       if (room.type === 'story' && remaining < 1) roomsToDelete.push(room.id);
     }
   }
@@ -171,6 +171,29 @@ export async function createGroup(title, characterIds) {
 }
 
 /** 建立 Story 場景;至少需要 1 個角色。 */
+/** 建立旁觀群(peek):角色們自己的群組,玩家不在成員裡、只能偷看。 */
+export async function createPeek(title, characterIds) {
+  const state = getState();
+  if (!Array.isArray(characterIds) || characterIds.length < 2) {
+    throw new Error('旁觀群至少需要兩個角色。');
+  }
+  const room = {
+    id: genId('room'),
+    type: 'peek',
+    title: (title || '他們的群組').trim(),
+    personaId: getCharacter(characterIds[0])?.knownPersonaId || state.defaultPersonaId || null,
+    participantIds: [...characterIds],   // 沒有 player:你不在裡面
+    createdAt: Date.now(),
+    initialized: true,
+    styleOverrides: {},
+    statusBar: '',
+  };
+  state.rooms.push(room);
+  state.messagesByRoom[room.id] = [];
+  await persist();
+  return room;
+}
+
 export async function createStory(title, characterIds) {
   const state = getState();
   if (!Array.isArray(characterIds) || characterIds.length < 1) {
@@ -184,6 +207,8 @@ export async function createStory(title, characterIds) {
     participantIds: ['player', ...characterIds],
     createdAt: Date.now(),
     initialized: false,
+    archivedChapters: [],
+    chapterCount: 0,
   };
   state.rooms.push(room);
   state.messagesByRoom[room.id] = [];

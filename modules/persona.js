@@ -50,7 +50,7 @@ export function syncPlayerMirror() {
   };
 }
 
-export async function createPersona({ name, description = '', avatarImage = null }) {
+export async function createPersona({ name, description = '', avatarImage = null, label = '' }) {
   const persona = {
     id: genId('psn'),
     name: String(name || '').trim() || '未命名人設',
@@ -68,6 +68,7 @@ export async function updatePersona(id, patch) {
   if (!p) return null;
   if (patch.name !== undefined) p.name = String(patch.name).trim() || p.name;
   if (patch.description !== undefined) p.description = String(patch.description);
+  if (patch.label !== undefined) p.label = String(patch.label).trim();
   if (patch.avatarImage !== undefined) p.avatarImage = patch.avatarImage;
   syncPlayerMirror();
   await persist();

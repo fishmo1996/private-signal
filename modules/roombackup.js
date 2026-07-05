@@ -79,6 +79,9 @@ export function exportRoomJson(roomId) {
       type: room.type,
       title: room.title,
       authorNote: room.authorNote || '',
+      statusBar: room.statusBar || '',
+      chapterCount: room.chapterCount || 0,
+      archivedChapters: room.archivedChapters || [],
     },
     participants: chars.map(charSnapshot),
     messages,
@@ -101,7 +104,7 @@ export function parseRoomImport(jsonText) {
   if (!parsed.room?.type || !Array.isArray(parsed.participants) || !Array.isArray(parsed.messages)) {
     throw new Error('備份檔結構不完整(缺 room / participants / messages)');
   }
-  if (!['dm', 'group', 'story'].includes(parsed.room.type)) {
+  if (!['dm', 'group', 'story', 'peek'].includes(parsed.room.type)) {
     throw new Error(`未知的聊天室型別:${parsed.room.type}`);
   }
   if (!parsed.participants.length || parsed.participants.some((p) => !p?.name)) {
@@ -138,6 +141,11 @@ export async function importRoom(parsed) {
   let room;
   if (parsed.room.type === 'dm') {
     room = state.rooms.find((r) => r.type === 'dm' && r.participantIds.includes(charIds[0]));
+  } else if (parsed.room.type === 'peek') {
+    const { createPeek } = await import('./rooms.js');
+    room = charIds.length >= 2
+      ? await createPeek(`${parsed.room.title}(匯入)`, charIds)
+      : await createStory(`${parsed.room.title}(匯入)`, charIds);
   } else if (parsed.room.type === 'group') {
     room = charIds.length >= 2
       ? await createGroup(`${parsed.room.title}(匯入)`, charIds)
@@ -147,6 +155,11 @@ export async function importRoom(parsed) {
   }
   if (!room) throw new Error('聊天室建立失敗');
   if (parsed.room.authorNote) room.authorNote = parsed.room.authorNote;
+  if (parsed.room.statusBar) room.statusBar = parsed.room.statusBar;
+  if (parsed.room.chapterCount) room.chapterCount = parsed.room.chapterCount;
+  if (Array.isArray(parsed.room.archivedChapters) && parsed.room.archivedChapters.length) {
+    room.archivedChapters = parsed.room.archivedChapters;
+  }
 
   // 訊息:整批覆蓋新房(DM 會蓋掉自動插入的開場白,忠實還原備份)
   state.messagesByRoom[room.id] = parsed.messages.map((m) => ({

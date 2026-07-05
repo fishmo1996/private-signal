@@ -9,7 +9,7 @@ import { getState, getRoom, getRoomMessages, getRoomCharacters } from './state.j
 import { matchEntries } from './worldbook.js';
 import { personaForRoom, getPersona } from './persona.js';
 import { sharedMemoriesFor } from './memory.js';
-import { albumTextFor } from './album.js';
+import { albumTextFor, anniversaryTextFor } from './album.js';
 
 const HARD_MESSAGE_CAP = 80;
 
@@ -172,14 +172,23 @@ export function buildPrompt({ character, roomId }) {
     `【共享記憶】\n${formatMemories(sharedMemories)}`,
     `【${character.name} 的私密記憶(其他角色不可見)】\n${formatMemories(privateMemories)}`,
     ...(albumTextFor(character.id) ? [`【共同的回憶(相簿)】\n${albumTextFor(character.id)}`] : []),
+    ...(!character.noPhone && anniversaryTextFor(character.id) ? [`【特別的日子】${anniversaryTextFor(character.id)}——如果自然,可以提起它。`] : []),
     `【本場景記憶(僅本 room 參與者可見)】\n${formatMemories(roomMemories)}`,
     `【世界書(依關鍵字觸發)】\n${loreText}`,
     ...(useRealTime ? nowSection(lastTs) : []),
     ...(character.noPhone ? [] : [`【最近的社群動態(公開,所有人都看得到)】\n${recentFeedText(state)}`]),
     `【其他介面中,${character.name} 可知曉的近期內容】\n${formatCross(crossContext)}`,
-    `【回覆指令】${styleGuide} 訊息可自然使用 emoji,頻率與風格依角色個性。${
+    `【回覆指令】${styleGuide} ${
+  state.settings?.chatFeel !== false
+    ? '以真實聊天軟體的口吻回覆:第一人稱、口語、像在打字。把回覆拆成 1~3 則短訊息(每則不超過 100 字),訊息之間用單獨一行「---」分隔。絕對不要第三人稱旁白敘事(不要寫「他抓了抓頭髮」這種)。動作或神態通常不用寫——真人打字很少描述自己的動作;偶爾需要時才用括號短註,而且要貼合你當下真實在做的事,不要有固定口頭禪式的重複動作。'
+    : ''
+} 訊息可自然使用 emoji,頻率與風格依角色個性。${
   state.settings?.voiceTag !== false && !character.noPhone
     ? '如果這則訊息更適合「用說的」(情緒濃的時刻、撒嬌、慵懶的晚安、哼一句歌),在訊息最開頭加上標記[語音]——大約一成的時機,別常用。'
+    : ''
+}${
+  state.settings?.moodEmoji !== false && !character.noPhone
+    ? ' 在整段輸出的最後另起一行加上「[心情:x]」,x 是最能代表你此刻對玩家心情的一個 emoji。'
     : ''
 } 單則回覆長度上限約 ${maxReplyChars} 字。`,
     ...(room.authorNote?.trim()
@@ -232,6 +241,62 @@ function sortMemories(list) {
  * 這裡「只」放公開資訊——所有參與者的公開設定、共享記憶、場景記憶與世界書;
  * 絕不放任何角色的 DM 私密記憶,避免互相洩漏。
  */
+/**
+ * 旁觀群 prompt:角色們自己的私下群組,玩家不在場(但在偷看)。
+ * 素材只有公開資訊:彼此資料、關係、圈子共享記憶、公開動態、本群歷史。
+ * 任何人的 DM 私密記憶絕不進來。
+ */
+export function buildPeekPrompt({ roomId }) {
+  const state = getState();
+  const room = getRoom(roomId);
+  const participants = getRoomCharacters(room);
+  const personaP = personaForRoom(room);
+  const sharedMemories = sharedMemoriesFor(personaP?.id);
+  const recentMessages = budgetSlice(getRoomMessages(roomId))
+    .map((m) => ({
+      role: 'assistant',
+      speaker: (state.characters.find((c) => c.id === m.senderId)?.name) || '成員',
+      content: `(${fmtMsgTime(m.createdAt)})${m.content}`,
+    }));
+  const recentText = recentMessages.map((m) => m.content).join('\n');
+  const loreLines = [];
+  const seenLore = new Set();
+  for (const c of participants) {
+    for (const e of matchEntries({ characterId: c.id, roomId, recentText })) {
+      if (seenLore.has(e.title)) continue;
+      seenLore.add(e.title);
+      loreLines.push(`- (${e.bookName}/${e.title}) ${e.content}`);
+    }
+  }
+  const profiles = participants.flatMap((c) => [
+    `- ${c.name}:${c.description || '(未提供)'}`,
+    `  個性:${c.personality || '(未提供)'}`,
+    c.emojiStyle?.trim() && !c.noPhone ? `  Emoji 習慣:${c.emojiStyle.trim()}` : '',
+  ].filter(Boolean));
+  const system = [
+    ...globalPromptSection(roomId),
+    `這是「${room.title}」——以下角色們自己的私下群組。`,
+    `【成員】\n${profiles.join('\n')}`,
+    ...relationshipSection(participants),
+    `【重要】玩家「${personaP?.name || '那個人'}」不在這個群組裡,看不到這裡的訊息。`
+    + '你們可以自然聊到這個人——背著本人講話的那種語氣;絕對不要對這個人喊話,也不要代替其發言。',
+    `【關於「${personaP?.name || '那個人'}」你們知道的】${personaP?.description?.trim() || '(所知不多)'}`,
+    '【務實原則】聊到這個人時,只根據上面的資料、共享記憶與這個群裡聊過的內容;'
+    + '不知道的事可以用猜的口吻(「不知道他最近在幹嘛」),但不要編造沒發生過的具體事件。',
+    `【共享記憶(大家都知道的事)】\n${formatMemories(sharedMemories)}`,
+    ...(participants.every((c) => c.noPhone) ? [] : [`【最近的社群動態(公開)】\n${recentFeedText(state)}`]),
+    ...nowSection(getRoomMessages(roomId).slice(-1)[0]?.createdAt || null),
+    ...(loreLines.length ? [`【世界設定】\n${loreLines.join('\n')}`] : []),
+    '【自聊指令】從共同知道的事挑話題聊 2~5 則,有來有往,可以互虧、歪樓、八卦不在場的人。',
+    '【輸出格式】只輸出 JSON 陣列,不要其他文字:[{"name":"角色名","content":"訊息"}]。',
+  ].filter(Boolean).join('\n\n');
+  return {
+    system,
+    messages: [...recentMessages, { role: 'user', content: '(群組安靜了一陣子,你們之中有人先開口。)' }],
+    meta: { mode: 'peek', maxReplyChars: state.apiConfig?.maxReplyChars?.group || 1200 },
+  };
+}
+
 export function buildGroupPrompt({ roomId, mentionName = null, selfTalk = false }) {
   const state = getState();
   const room = getRoom(roomId);
@@ -377,6 +442,7 @@ export function buildStoryPrompt({ roomId }) {
   const system = [
     ...globalPromptSection(roomId),
     `你是互動小說的說書人,負責「${room.title}」這個場景。`,
+    ...(room.statusBar?.trim() ? [`【當前狀態(劇情時間/地點/狀態,以此為準)】${room.statusBar.trim()}`] : []),
     `【在場角色(公開資料)】\n${profiles}`,
     `【玩家角色】${persona?.name || '(未命名玩家)'}:${persona?.description || '(未提供描述)'}`,
     ...relationshipSection(participants),

@@ -8,9 +8,10 @@
 import { getCharacter,
   getState, genId, persist, getRoom, getRoomMessages, getRoomCharacters,
 } from './state.js';
-import { buildPrompt, buildGroupPrompt, buildStoryPrompt } from './prompt.js';
+import { buildPrompt, buildGroupPrompt, buildStoryPrompt, buildPeekPrompt } from './prompt.js';
 import { getApiConfig, generateReply, stripNamePrefix, parseGroupReplies } from './api.js';
-import { extractVoiceTag } from './voice.js';
+import { extractVoiceTag, extractMoodTag } from './voice.js';
+import { anniversaryTextFor } from './album.js';
 
 /* ---------------- 基礎工具 ---------------- */
 
@@ -229,6 +230,7 @@ export function isRoomBusy(roomId) {
 export async function sendUserMessage(roomId, text, notify, image = null, sharedPost = null) {
   const room = getRoom(roomId);
   if (!room || (!text.trim() && !image && !sharedPost) || busyRoomIds.has(roomId)) return;
+  if (room.type === 'peek') return; // 旁觀群:你不在裡面,說不了話(UI 已藏輸入框,這裡是底層防呆)
 
   busyRoomIds.add(roomId);
   try {
@@ -296,13 +298,31 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
         notify({ typingBy: character.name });
         const r = await generateReply(cfg, prompt);
         if (r.ok) {
-          const vt = extractVoiceTag(stripNamePrefix(r.text, [character.name]));
-          appendMessage(roomId, {
-            role: 'character',
-            senderId: character.id,
-            content: vt.content,
-            ...(vt.voice ? { voice: true } : {}),
-          });
+          const md = extractMoodTag(stripNamePrefix(r.text, [character.name]));
+          if (md.mood) { room.mood = { emoji: md.mood, at: Date.now() }; }
+          const vt = extractVoiceTag(md.content);
+          if (vt.voice || getState().settings.chatFeel === false) {
+            // 語音訊息維持單則
+            appendMessage(roomId, {
+              role: 'character',
+              senderId: character.id,
+              content: splitChatParts(vt.content).join('\n') || vt.content,
+              ...(vt.voice ? { voice: true } : {}),
+            });
+          } else {
+            const parts = splitChatParts(vt.content);
+            for (const [pi, part] of parts.entries()) {
+              if (pi > 0) {
+                notify({ typingBy: character.name });
+                // eslint-disable-next-line no-await-in-loop
+                await sleep(500 + Math.min(part.length * 12, 900));
+              }
+              appendMessage(roomId, { role: 'character', senderId: character.id, content: part });
+              // eslint-disable-next-line no-await-in-loop
+              await persist();
+              notify({});
+            }
+          }
         } else {
           appendMessage(roomId, {
             role: 'system',
@@ -451,31 +471,45 @@ export function selfChatCooldownLeft() {
 export async function selfChat(roomId, notify, opts = {}) {
   const state = getState();
   const room = getRoom(roomId);
-  if (!room || room.type !== 'group' || busyRoomIds.has(roomId)) {
+  if (!room || (room.type !== 'group' && room.type !== 'peek') || busyRoomIds.has(roomId)) {
     return { ok: false, message: '這裡不能自聊' };
   }
-  if (!opts.force) {
+  const isEmptyRoom = (getRoomMessages(roomId) || []).length === 0;
+  if (!opts.force && !isEmptyRoom) {
+    // 空房第一把免冷卻;冷卻只在「成功」後才開始計(失敗不燒額度)
     const left = selfChatCooldownLeft();
     if (left > 0) return { ok: false, message: `再等 ${Math.ceil(left / 60)} 分鐘可以再刷新` };
   }
-  state.selfChatLastRefresh = Date.now();
-  await persist();
 
   busyRoomIds.add(roomId);
   try {
     const participants = getRoomCharacters(room);
     const cfg = getApiConfig();
     if (cfg.useRealApi && cfg.apiKey && cfg.model) {
-      const prompt = buildGroupPrompt({ roomId, selfTalk: true });
-      prompt.messages = [
-        ...prompt.messages,
-        { role: 'user', content: '(群組安靜了一陣子,你們之中有人先開口。)' },
-      ];
+      let prompt;
+      if (room.type === 'peek') {
+        prompt = buildPeekPrompt({ roomId }); // 已含合成 user 回合
+      } else {
+        prompt = buildGroupPrompt({ roomId, selfTalk: true });
+        prompt.messages = [
+          ...prompt.messages,
+          { role: 'user', content: '(群組安靜了一陣子,你們之中有人先開口。)' },
+        ];
+      }
       notify({ typingBy: participants[0]?.name || '' });
       const r = await generateReply(cfg, prompt);
-      if (!r.ok) return { ok: false, message: r.message };
+      if (!r.ok) {
+        appendMessage(roomId, { role: 'system', senderId: 'system', content: `刷新失敗:${r.message}(冷卻未消耗,可直接再按一次)` });
+        await persist(); notify({ typingBy: '' }); notify({});
+        return { ok: false, message: r.message };
+      }
       const replies = parseGroupReplies(r.text, participants, 5);
-      if (!replies.length) return { ok: false, message: '這次大家都沒開口,再試一次' };
+      if (!replies.length) {
+        appendMessage(roomId, { role: 'system', senderId: 'system', content: '這次大家都沒開口(模型輸出無法解析);冷卻未消耗,再按一次試試。' });
+        await persist(); notify({ typingBy: '' }); notify({});
+        return { ok: false, message: '這次大家都沒開口,再試一次' };
+      }
+      state.selfChatLastRefresh = Date.now();
       for (const [i, rep] of replies.entries()) {
         notify({ typingBy: getCharacter(rep.characterId)?.name || '' });
         // eslint-disable-next-line no-await-in-loop
@@ -489,6 +523,7 @@ export async function selfChat(roomId, notify, opts = {}) {
       return { ok: true, count: replies.length };
     }
     // mock:兩三句互虧
+    state.selfChatLastRefresh = Date.now();
     const seed = hashStr(roomId) + Math.floor(Date.now() / 60000);
     const [c1, c2] = [participants[seed % participants.length], participants[(seed + 1) % participants.length]];
     const lastUser = getRoomMessages(roomId).filter((m) => m.role === 'user').slice(-1)[0];
@@ -513,6 +548,15 @@ export async function selfChat(roomId, notify, opts = {}) {
   } finally {
     busyRoomIds.delete(roomId);
   }
+}
+
+/** 聊天感模式:把「---」分隔的回覆拆成多則(上限 3),像連發訊息。 */
+export function splitChatParts(text) {
+  return String(text || '')
+    .split(/\n\s*-{3,}\s*\n?|^\s*-{3,}\s*$/m)
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .slice(0, 3);
 }
 
 /** 從正文輸出抽出「▷ 選項」行:回傳 {content, choices}。 */
@@ -578,6 +622,12 @@ export function proactivityScoreFor(roomId) {
   if (days >= 2) {
     score += Math.min(days, 7) * 0.25;
     reasons.push(`你們已經 ${Math.floor(days)} 天沒說話了,你有點想他`);
+  }
+  // 紀念日:今天是你們的特別日子 → 強力加分
+  const anni = anniversaryTextFor(character.id);
+  if (anni) {
+    score += 2.0;
+    reasons.unshift(anni);
   }
   // 記憶鉤子:釘選的私密記憶(通常是「之後要一起…」這類重要事項)
   const pinned = (getState().memories.byCharacterId[character.id] || []).filter((m) => m.pinned);
@@ -651,7 +701,9 @@ export async function refreshChats(opts = {}) {
   }
   if (!content) return { ok: true };
 
-  const vtP = extractVoiceTag(content);
+  const mdP = extractMoodTag(content);
+  if (mdP.mood) { room.mood = { emoji: mdP.mood, at: Date.now() }; }
+  const vtP = extractVoiceTag(mdP.content);
   appendMessage(room.id, {
     role: 'character', senderId: character.id, content: vtP.content,
     ...(vtP.voice ? { voice: true } : {}),

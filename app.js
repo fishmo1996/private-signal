@@ -16,6 +16,7 @@ async function boot() {
     const res = await fetch('./data/config.json');
     if (!res.ok) throw new Error(`無法載入 data/config.json(HTTP ${res.status})`);
     const config = await res.json();
+  console.log(`[私人訊號] 版本:${config.version || '(未知)'}`);
 
     document.title = config.appName || '私人訊號';
 
