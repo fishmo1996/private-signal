@@ -545,14 +545,14 @@ function renderRoomView() {
     ${appHeader(room.type === 'dm' && getState().settings.moodEmoji !== false && room.mood?.emoji ? `${room.title} ${room.mood.emoji}` : room.title, {
       subtitle: statusText,
       leadingHtml: isStory ? '<span class="avatar sm neutral" aria-hidden="true">❖</span>' : avatarHtml(chars[0], 'sm'),
-      rightHtml: (room.type === 'dm' ? '<button class="header-action" id="btnRoomDiary">日記</button>'
-        : ((room.type === 'group' || room.type === 'peek') ? '<button class="header-action" id="btnSelfChat">↻</button>' : '')
-          + '<button class="header-action" id="btnRoomMembers">成員</button>')
-        + `<button class="header-action" id="btnRoomMemory">記憶${messagesSinceSummary(room.id).length >= 30 ? '<span class="unread-dot" aria-label="建議摘要"></span>' : ''}</button>`
-        + `<button class="header-action" id="btnAuthorNote">備註${room.authorNote?.trim() ? '●' : ''}</button>`
-        + (deletable ? '<button class="icon-btn" id="btnDeleteRoom" aria-label="刪除">✕</button>' : ''),
+      rightHtml: ((room.type === 'group' || room.type === 'peek') ? '<button class="header-action" id="btnSelfChat">↻</button>' : '')
+        + `<button class="header-action" id="btnRoomMore" aria-label="更多">⋯${
+  messagesSinceSummary(room.id).length >= 30 ? '<span class="unread-dot" aria-label="建議摘要"></span>' : ''
+}</button>`,
     })}
     <div class="messages ${isStory ? 'story-mode' : ''}" id="messages" aria-live="polite"></div>
+    <button id="__noteProxy" hidden></button>
+    ${deletable ? '<button id="__delProxy" hidden></button>' : ''}
     ${room.type === 'story' ? `
       <button class="status-bar-card ${room.statusBar?.trim() ? '' : 'empty'}" id="btnStatusBar" aria-label="編輯場景狀態">
         ${room.statusBar?.trim() ? esc(room.statusBar) : '⊕ 設定場景狀態(時間/地點/衣著…)'}
@@ -581,8 +581,34 @@ function renderRoomView() {
     </div>`}`;
 
   bindBack();
-  els.phoneScreen.querySelector('#btnAuthorNote').addEventListener('click', () => openAuthorNoteModal(room));
-  els.phoneScreen.querySelector('#btnRoomMemory').addEventListener('click', () => openRoomMemoryModal(room));
+  els.phoneScreen.querySelector('#__noteProxy').addEventListener('click', () => openAuthorNoteModal(room));
+  els.phoneScreen.querySelector('#btnRoomMore').addEventListener('click', () => {
+    const items = [
+      ...(room.type === 'dm' ? [['diary', '📔 日記']] : [['members', '👥 成員']]),
+      ['memory', `🧠 記憶${messagesSinceSummary(room.id).length >= 30 ? '(建議摘要)' : ''}`],
+      ['note', `✏️ 作者備註${room.authorNote?.trim() ? ' ●' : ''}`],
+      ...(deletable ? [['delete', '🗑 刪除此對話']] : []),
+    ];
+    openModal(`
+      <h3>${esc(room.title)}</h3>
+      <div class="check-list">
+        ${items.map(([k, label]) => `<button class="list-row" data-room-act="${k}"><span class="list-main"><span class="list-title">${label}</span></span></button>`).join('')}
+      </div>`, {
+      onOpen(root) {
+        root.querySelectorAll('[data-room-act]').forEach((btn2) => btn2.addEventListener('click', async () => {
+          closeModal();
+          const act = btn2.dataset.roomAct;
+          if (act === 'memory') openRoomMemoryModal(room);
+          else if (act === 'note') els.phoneScreen.querySelector('#__noteProxy')?.click();
+          else if (act === 'members') openRoomMembersModal(room);
+          else if (act === 'diary') {
+            const dmChar = getRoomCharacters(room)[0];
+            if (dmChar) { await navigate('character-diary', { characterId: dmChar.id }); renderAll(); }
+          } else if (act === 'delete') els.phoneScreen.querySelector('#__delProxy')?.click();
+        }));
+      },
+    });
+  });
   const statusBarBtn = els.phoneScreen.querySelector('#btnStatusBar');
   if (statusBarBtn) {
     statusBarBtn.addEventListener('click', () => {
@@ -622,20 +648,9 @@ function renderRoomView() {
       if (btn2) btn2.disabled = false;
     });
   }
-  const membersBtn = els.phoneScreen.querySelector('#btnRoomMembers');
-  if (membersBtn) membersBtn.addEventListener('click', () => openRoomMembersModal(room));
-  const diaryBtn = els.phoneScreen.querySelector('#btnRoomDiary');
-  if (diaryBtn) {
-    diaryBtn.addEventListener('click', async () => {
-      const dmChar = getRoomCharacters(room)[0];
-      if (!dmChar) return;
-      await navigate('character-diary', { characterId: dmChar.id });
-      renderAll();
-    });
-  }
 
   if (deletable) {
-    els.phoneScreen.querySelector('#btnDeleteRoom').addEventListener('click', () => {
+    els.phoneScreen.querySelector('#__delProxy').addEventListener('click', () => {
       openConfirmModal({
         title: room.type === 'group' ? '刪除這個聊天室?' : '刪除這個場景?',
         body: `「${room.title}」與其中的訊息會被移除。這個動作無法復原。`,
@@ -742,6 +757,7 @@ function renderMessages() {
   const room = getRoom(state.currentRoomId);
   if (!room) return;
   if (msgWindow.roomId !== room.id) msgWindow = { roomId: room.id, count: MSG_WINDOW_INIT };
+  wrap.classList.toggle('story-read', room.type === 'story');
   const allMsgs = getRoomMessages(room.id);
   const { msgs, hiddenCount } = windowMessages(allMsgs, msgWindow.count);
   const loadOlderHtml = hiddenCount > 0
@@ -829,6 +845,18 @@ function renderMessages() {
     wrap.scrollTop = wrap.scrollHeight;
   }
 
+  // 點訊息切換操作列(記住/編輯/刪除/▶ 平常隱藏,閱讀零噪音)
+  if (!wrap.dataset.tapBound) {
+    wrap.dataset.tapBound = '1';
+    wrap.addEventListener('click', (e) => {
+      if (e.target.closest('button, a, .voice-note, img')) return;
+      const item = e.target.closest('.msg-row, .msg-narrator');
+      if (!item) return;
+      const wasOpen = item.classList.contains('show-actions');
+      wrap.querySelectorAll('.show-actions').forEach((x) => x.classList.remove('show-actions'));
+      if (!wasOpen) item.classList.add('show-actions');
+    });
+  }
   const loadOlder = wrap.querySelector('#btnLoadOlder');
   if (loadOlder) {
     loadOlder.addEventListener('click', () => {

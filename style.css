@@ -1719,3 +1719,71 @@ body.theme-berry .avatar.player { color: #ffffff; }
   font-size: calc(11.5px * var(--fs-mult));
   text-align: center;
 }
+
+/* ============================================================
+   簡潔化:標題一行、操作列點擊浮出、正文閱讀版式
+   ============================================================ */
+
+/* A:標題永不直排溢出 */
+.phone-title-block { min-width: 0; }
+.phone-status {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.phone-header .header-action { flex-shrink: 0; }
+
+/* A:管理面板開關在窄螢幕縮小退場 */
+@media (max-width: 720px) {
+  .panel-toggle {
+    font-size: 10px;
+    padding: 3px 7px;
+    opacity: 0.45;
+  }
+  .panel-toggle:hover { opacity: 1; }
+}
+
+/* C:操作列平常只留時間,點訊息才浮出 */
+.msg-meta .remember-btn { display: none; }
+.show-actions .msg-meta .remember-btn { display: inline-block; }
+.msg-row, .msg-narrator { cursor: pointer; }
+.msg-meta { min-height: 15px; }
+
+/* B:正文閱讀版式(story 房專屬換皮) */
+.story-read { padding: 4px 6px; }
+.story-read .msg-narrator {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 2px 8px;
+  margin-bottom: 14px;
+}
+.story-read .narrator-body {
+  font-size: calc(14.5px * var(--fs-mult));
+  line-height: 2.0;
+  color: var(--ink);
+  letter-spacing: 0.02em;
+}
+.story-read .msg-row.user { margin: 4px 0 16px; }
+.story-read .msg-row.user .bubble.user-bubble {
+  background: transparent;
+  border: none;
+  border-left: 3px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 2px;
+  padding: 2px 12px;
+  color: var(--ink-dim);
+  font-size: calc(13.5px * var(--fs-mult));
+  line-height: 1.85;
+  max-width: 92%;
+}
+.story-read .msg-row.character .bubble.char-bubble {
+  background: rgba(255, 255, 255, 0.35);
+  border: none;
+  box-shadow: none;
+  line-height: 1.9;
+}
+.story-read .story-choices { padding: 0 8px; }
+
+/* 淺色主題:桌面左側導覽補覆寫(深色殘留最後一塊) */
+body.theme-sage .sidebar { background: rgba(240, 245, 240, 0.85); }
+body.theme-berry .sidebar { background: rgba(253, 243, 246, 0.88); }

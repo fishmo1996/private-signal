@@ -336,8 +336,12 @@ export function applyOutputRules(text) {
   return out;
 }
 
+/** 模型鸚鵡學舌時間戳的清除:剝掉每行開頭的「(7/5(週日) 14:22)」式前綴。 */
+const TS_PREFIX = /^\s*[((]\d{1,2}\/\d{1,2}\s*[((]週[日一二三四五六][))]\s*\d{1,2}:\d{2}[))]\s*/gm;
+
 /** 刮掉模型愛加的「名字:」前綴;所有 AI 輸出的統一後處理點(含輸出替換規則)。 */
 export function stripNamePrefix(text, names = []) {
+  text = String(text || '').replace(TS_PREFIX, ''); // 先剝時間戳,名字前綴才會回到行首
   let out = String(text || '');
   const list = (Array.isArray(names) ? names : [names])
     .filter(Boolean)

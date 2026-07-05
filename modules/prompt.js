@@ -46,9 +46,10 @@ function relationshipSection(participants) {
 /** 【現在時間】段(現實時間軸;noPhone 與正文不使用)。 */
 function nowSection(lastMsgTs = null) {
   const line = `現在是 ${fmtMsgTime(Date.now())}`;
+  const noEcho = '對話紀錄裡訊息前的「(日期 時間)」是系統附註,只供你理解時間脈絡——你的輸出絕對不要包含這種時間戳。';
   return lastMsgTs
-    ? [`【現在時間】${line};上一則訊息是${fmtGap(lastMsgTs)}。`]
-    : [`【現在時間】${line}。`];
+    ? [`【現在時間】${line};上一則訊息是${fmtGap(lastMsgTs)}。${noEcho}`]
+    : [`【現在時間】${line}。${noEcho}`];
 } // 極端上限,避免超多短訊息造成組裝負擔
 
 /**
