@@ -22,12 +22,15 @@ const peekBusy = new Set();
  * 丟棄不像「搜尋關鍵字」的行：括號開頭的旁白、冒號結尾的開場白、超長敘述句。
  * 全部被過濾時退回原文，寧可醜也不吞掉內容。
  */
-function sanitizeSearchSnapshot(text) {
+export function sanitizeSearchSnapshot(text) {
   const lines = String(text || '').split('\n').map((l) => l.trim()).filter(Boolean);
   const kept = lines.filter((l) => {
     if (/^[((\[【「]/.test(l)) return false;        // 旁白/動作描寫開頭
-    if (/[::]$/.test(l)) return false;              // 「這些是我最近的搜尋紀錄:」式開場白
-    if (/[,,。!?!?~]/.test(l) && l.length > 24) return false; // 帶標點的長句=說話,不是搜尋
+    if (/[::]$/.test(l)) return false;              // 開場白(冒號結尾)
+    if (/^[-—=~*·.。\s]+$/.test(l)) return false;    // 純符號行(拆條分隔線「---」的鸚鵡)
+    if (/[,,。;;]/.test(l)) return false;           // 含逗號/句號=在講話,真人搜尋不打這些
+    if (/妳/.test(l)) return false;                   // 第二人稱=對玩家說話,不是搜尋
+    if (/[!?!?~]/.test(l) && l.length > 24) return false; // 帶語氣的長句
     if (l.length > 40) return false;                  // 真人搜尋詞不會這麼長
     return true;
   });

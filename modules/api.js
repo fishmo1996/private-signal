@@ -350,6 +350,12 @@ const TS_PREFIX = /^\s*[((][^\n]{0,18}?[\d0-9]{1,2}\s*[::][\d0-9]{2}\s*[))]\s*/g
 const REL_TIME_ECHO = /\s*[((]約\s?\d+\s?(?:天|個月|年)前[^))]{0,12}[))]/g;
 
 /** 刮掉模型愛加的「名字：」前綴；所有 AI 輸出的統一後處理點(含輸出替換規則)。 */
+/** v62:單獨匯出時間戳剝除——模型會把「---(時間戳)」寫在同一行,整段剝除時
+ *  它不在行首而漏網,拆條切掉 --- 後就浮上訊息開頭;拆條後每則再剝一次。 */
+export function stripTsPrefix(text) {
+  return String(text || '').replace(TS_PREFIX, '');
+}
+
 export function stripNamePrefix(text, names = []) {
   text = String(text || '').replace(TS_PREFIX, ''); // 先剝時間戳，名字前綴才會回到行首
   text = text.replace(REL_TIME_ECHO, ''); // 剝「(約 N 天前)」系統附註的鸚鵡

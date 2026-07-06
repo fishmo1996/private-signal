@@ -9,7 +9,7 @@ import { getCharacter,
   getState, genId, persist, getRoom, getRoomMessages, getRoomCharacters,
 } from './state.js';
 import { buildPrompt, buildGroupPrompt, buildStoryPrompt, buildPeekPrompt, buildRoomInnerVoicePrompt } from './prompt.js';
-import { getApiConfig, generateReply, stripNamePrefix, parseGroupReplies } from './api.js';
+import { getApiConfig, generateReply, stripNamePrefix, parseGroupReplies, stripTsPrefix } from './api.js';
 import { extractVoiceTag, extractMoodTag, extractStatusTag } from './voice.js';
 import { anniversaryTextFor } from './album.js';
 import { anniversaryMemoryHits } from './memory.js';
@@ -625,7 +625,7 @@ export async function generateInnerVoice(roomId, messageId, characterId = null) 
 export function splitChatParts(text) {
   return String(text || '')
     .split(/\n\s*-{3,}\s*\n?|^\s*-{3,}\s*$/m)
-    .map((t) => t.trim())
+    .map((t) => stripTsPrefix(t).trim()) // v62:拆條後每則再剝一次時間戳(--- 同行漏網案)
     .filter(Boolean)
     .slice(0, 3);
 }

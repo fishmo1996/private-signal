@@ -202,7 +202,7 @@ export function buildPrompt({ character, roomId, innerVoiceOf = null }) {
     `【本場景記憶(僅本 room 參與者可見)】\n${formatMemories(roomMemories)}`,
     `【世界書(依關鍵字觸發)】\n${loreText}`,
     ...(useRealTime ? nowSection(lastTs) : []),
-    ...(character.noPhone ? [] : [`【最近的社群動態(公開，所有人都看得到)】\n${recentFeedText(state)}`]),
+    ...(character.noPhone ? [] : [`【最近的社群動態(公開)】\n${recentFeedText(state, persona?.id)}`]),
     `【其他介面中,${character.name} 可知曉的近期內容】\n${formatCross(crossContext)}`,
     innerVoiceOf
       ? '【任務】以下不是要你回覆對話：請寫出你剛才說出最後那則訊息的「當下」，心裡真正的想法——表面沒說出口的部分(動作洩漏的、語氣藏著的、不敢講的)。第一人稱純內心獨白,100~200 字；不要對玩家喊話、不要引號包裹、不要描述自己的動作、不要任何標記格式。輸出繁體中文。'
@@ -316,7 +316,7 @@ export function buildPeekPrompt({ roomId }) {
     '【務實原則】聊到這個人時，只根據上面的資料、共享記憶與這個群裡聊過的內容;'
     + '不知道的事可以用猜的口吻(「不知道他最近在幹嘛」),但不要編造沒發生過的具體事件。',
     `【共享記憶(大家都知道的事)】\n${formatMemories(sharedMemories)}`,
-    ...(participants.every((c) => c.noPhone) ? [] : [`【最近的社群動態(公開)】\n${recentFeedText(state)}`]),
+    ...(participants.every((c) => c.noPhone) ? [] : [`【最近的社群動態(公開)】\n${recentFeedText(state, personaP?.id)}`]),
     ...nowSection(getRoomMessages(roomId).slice(-1)[0]?.createdAt || null),
     ...(loreLines.length ? [`【世界設定】\n${loreLines.join('\n')}`] : []),
     '【自聊指令】從共同知道的事挑話題聊 2~5 則，有來有往，可以互虧、歪樓、八卦不在場的人。',
@@ -388,7 +388,7 @@ export function buildGroupPrompt({ roomId, mentionName = null, selfTalk = false 
     `【世界書(依關鍵字觸發)】\n${loreText}`,
     ...relationshipSection(participants),
     ...(useRealTimeG ? nowSection(lastTsG) : []),
-    ...(participants.every((c) => c.noPhone) ? [] : [`【最近的社群動態(公開，所有人都看得到)】\n${recentFeedText(state)}`]),
+    ...(participants.every((c) => c.noPhone) ? [] : [`【最近的社群動態(公開)】\n${recentFeedText(state, personaG?.id)}`]),
     ...(selfTalk ? [
       '【自聊模式】玩家目前沒有說話。你們自己聊起來：從共同知道的近期內容(群裡聊過的、公開動態、大家都知道的事)挑話題,'
       + '2~5 則，有來有往，可以互虧、可以歪樓；不要對玩家喊話，也不要代替玩家發言。',
@@ -407,8 +407,14 @@ export function buildGroupPrompt({ roomId, mentionName = null, selfTalk = false 
 }
 
 /** 最近社群動態摘要(公開資訊，所有聊天 prompt 共用)。 */
-function recentFeedText(state, limit = 4) {
-  const posts = (state.posts || []).slice(0, limit);
+function recentFeedText(state, personaId = null, limit = 4) {
+  // v62 圈子隔離:玩家有多個人設(不同世界觀分身)時,角色只看得到「他認識的那個你」
+  // 所屬圈子的貼文;無圈子標記的舊貼文視為全域可見。修「同居線角色把家教線人設
+  // 發的披薩文當成眼前這個你」的跨圈污染。
+  const pid = personaId || state.defaultPersonaId;
+  const posts = (state.posts || [])
+    .filter((pp) => !pp.personaId || pp.personaId === pid)
+    .slice(0, limit);
   if (!posts.length) return '(目前沒有動態)';
   return posts.map((p) => {
     const who = p.authorId === 'player'
@@ -496,7 +502,7 @@ export function buildStoryPrompt({ roomId }) {
     `【共享記憶】\n${formatMemories(sharedMemories)}`,
     `【本場景記憶】\n${formatMemories(roomMemories)}`,
     `【世界書(依關鍵字觸發)】\n${loreText}`,
-    ...(participants.every((c) => c.noPhone) ? [] : [`【最近的社群動態(公開；僅供了解角色近況，其發文時間與正文的劇情時間無關)】\n${recentFeedText(state)}`]),
+    ...(participants.every((c) => c.noPhone) ? [] : [`【最近的社群動態(公開；僅供了解角色近況，其發文時間與正文的劇情時間無關)】\n${recentFeedText(state, persona?.id)}`]),
     `【回覆指令】${styleGuide} ${choiceGuide} 單次輸出長度上限約 ${maxReplyChars} 字。`,
     ...(director ? [director] : []),
     ...(room.authorNote?.trim()
@@ -628,7 +634,7 @@ export function buildPhonePeekPrompt({ character, peekType }) {
 
   const TASKS = {
     draft: `【任務】想像你(${character.name})的手機訊息 App 裡，躺著幾則「打了又沒送出」的草稿。輸出 2~4 則：大多是想傳給${persona?.name || '玩家'}的，可以有一則是給你認識的其他人。每行一則，格式三欄：收件人||草稿內容||一句沒送出的原因(內心註記)。草稿的語氣必須符合你平常的訊息風格與目前的關係階段；沒送出的原因要誠實(遲疑、害羞、覺得太黏、時機不對……)。`,
-    search: `【任務】輸出你(${character.name})手機瀏覽器「最近的搜尋紀錄」5~8 條，由最近到較早。每行一條搜尋關鍵字，像真人會打的那樣(可以口語、可以打錯重搜、可以好笑、可以洩露口是心非)。這些搜尋要反映你最近真正掛心的事。每行必須是「純搜尋關鍵字」：不要開場白、不要對任何人說話、不要括號動作或旁白描寫、不要任何說明句。搜尋條目不要包含你自己的名字或自稱——沒有人會用自己的名字當每條搜尋的開頭。你認識的人也不會出現在你的搜尋裡：你不需要上網查你早就認識的人是誰。`,
+    search: `【任務】輸出你(${character.name})手機瀏覽器「最近的搜尋紀錄」5~8 條，由最近到較早。每行一條搜尋關鍵字，像真人會打的那樣(可以口語、可以打錯重搜、可以好笑、可以洩露口是心非)。這些搜尋要反映你最近真正掛心的事。每行必須是「純搜尋關鍵字」：不要開場白、不要對任何人說話、不要括號動作或旁白描寫、不要任何說明句;不要複述你們對話裡說過的句子(搜尋紀錄不是訊息),也不要輸出「---」或任何分隔線。搜尋條目不要包含你自己的名字或自稱——沒有人會用自己的名字當每條搜尋的開頭。你認識的人也不會出現在你的搜尋裡：你不需要上網查你早就認識的人是誰。`,
     playlist: `【任務】輸出你(${character.name})音樂 App 的「最近播放」5~6 首。每行一首，格式：歌名 — 歌手。歌名與歌手必須全部虛構，不可使用任何真實存在的歌曲或藝人；但要「聽起來像存在」，風格符合你的品味與此刻心境。最後另起一行，以「循環理由：」開頭，寫一句你此刻反覆播放這些歌的原因。`,
   };
 

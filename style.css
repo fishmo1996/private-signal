@@ -1889,3 +1889,29 @@ textarea#composerInput[data-autogrow] { overflow-y: auto; resize: none; }
 .pet-bubble { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%) scaleX(var(--flip,1)); margin-bottom: 4px; padding: 4px 9px; background: rgba(255,255,255,.92); color: #3a3330; border-radius: 10px; font-size: 11px; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
 .desktop-pet[style*="scaleX(-1)"] .pet-bubble { transform: translateX(-50%) scaleX(-1); }
 @media (prefers-reduced-motion: reduce) { .desktop-pet { transition: none; } .desktop-pet .pet-body { animation: none !important; } }
+
+/* v62:勾選框看得見版——原生 accent-color 在手機上勾了跟沒勾差不多,改自繪:
+   未勾=空框;已勾=主題色實心+白勾,一眼分明。 */
+.check-field input[type="checkbox"],
+.check-list input[type="checkbox"],
+.setting-row input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none;
+  width: 21px; height: 21px; flex: none;
+  border: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 6px; background: transparent;
+  display: inline-grid; place-content: center;
+  cursor: pointer; margin: 0;
+  transition: background .12s, border-color .12s;
+}
+.check-field input[type="checkbox"]:checked,
+.check-list input[type="checkbox"]:checked,
+.setting-row input[type="checkbox"]:checked {
+  background: var(--accent); border-color: var(--accent);
+}
+.check-field input[type="checkbox"]:checked::before,
+.check-list input[type="checkbox"]:checked::before,
+.setting-row input[type="checkbox"]:checked::before {
+  content: ""; width: 11px; height: 6px;
+  border-left: 2.5px solid #fff; border-bottom: 2.5px solid #fff;
+  transform: rotate(-45deg) translate(1px, -1px);
+}
