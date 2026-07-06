@@ -104,6 +104,16 @@ export function extractMoodTag(text) {
   return { content: t, mood: null };
 }
 
+/** 提案 M:從輸出尾偵測「[狀態:一句話]」:回傳 {content, status}。>15 字或空=丟棄但仍剝除。 */
+export function extractStatusTag(text) {
+  const t = String(text || '');
+  const m = t.match(/\n?\s*(?:\[|【)狀態[::]\s*([^\]】\n]{0,40}?)\s*(?:\]|】)\s*$/);
+  if (!m) return { content: t, status: null };
+  const raw = m[1].trim();
+  const status = raw && raw.length <= 15 ? raw : null; // 壞格式寧可丟棄不硬塞
+  return { content: t.slice(0, m.index).trim(), status };
+}
+
 /** 從 AI 輸出偵測「[語音]」標記:回傳 {content, voice}。 */
 export function extractVoiceTag(text) {
   const t = String(text || '');

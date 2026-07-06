@@ -77,8 +77,14 @@ function migrate(s) {
   if (s.settings.moodEmoji === undefined) s.settings.moodEmoji = true; // DM 標題列的角色當下心情小表情
   if (s.settings.storyDirector === undefined) s.settings.storyDirector = true; // 內建正文導演指令(單/多人自動切換,英文省 token)
   if (s.settings.secondaryForSocialDiary === undefined) s.settings.secondaryForSocialDiary = false; // 社群發文/留言與日記走次要模型
+  if (s.lastBackupAt === undefined) s.lastBackupAt = null; // 上次全域備份時間(黃燈提醒用)
+  if (s.settings.lastSeenVersion === undefined) s.settings.lastSeenVersion = ''; // 更新彈窗(O-2)
+  // 提案 L:settings.pet 由 pet.js petSettings() 懶初始化,不在此硬塞(避免預設台詞雙處維護)
   for (const ps of s.personas || []) {
     if (ps.label === undefined) ps.label = '';
+  }
+  for (const ch of s.characters || []) {
+    if (ch.status === undefined) ch.status = null; // 提案 M:通訊軟體狀態 {text, at}
   }
   {
     // 提案 C:記憶補 eventDate(由 createdAt 導出;annualDate 選填不回填)
@@ -117,6 +123,7 @@ function migrate(s) {
   if (s.diaryLastRefresh === undefined) s.diaryLastRefresh = 0;
   if (s.selfChatLastRefresh === undefined) s.selfChatLastRefresh = 0;
   if (!s.diariesByCharacterId) s.diariesByCharacterId = {};
+  if (!s.phonePeeksByCharacterId) s.phonePeeksByCharacterId = {}; // 提案 K:偷看手機快照
   if (!Array.isArray(s.photos)) s.photos = [];
   if (s.settings.voiceTag === undefined) s.settings.voiceTag = true;      // 角色自己判斷何時傳語音訊息
   if (s.settings.ttsProvider === undefined) s.settings.ttsProvider = 'browser';

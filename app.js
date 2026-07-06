@@ -8,7 +8,7 @@ import { initDB, diagnostics } from './utils/indexeddb.js';
 import { initState, getState, persist } from './modules/state.js';
 import { ensureRoomInitialized } from './modules/rooms.js';
 import { initNavigation } from './modules/navigation.js';
-import { initUI } from './modules/ui.js';
+import { initUI, maybeShowChangelog } from './modules/ui.js';
 
 async function boot() {
   try {
@@ -47,6 +47,7 @@ async function boot() {
 
     // 5. 渲染
     initUI();
+    maybeShowChangelog(config.changelog || []); // O-2:每版一次的更新摘要
   } catch (err) {
     console.error(err);
     const stage = document.getElementById('phoneScreen');

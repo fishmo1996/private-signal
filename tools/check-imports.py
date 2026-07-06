@@ -13,6 +13,8 @@ for f in glob.glob('modules/*.js')+['utils/indexeddb.js']:
 problems=[]
 for f in glob.glob('modules/*.js')+['app.js']:
     s=open(f).read()
+    s=re.sub(r'//[^\n]*', '', s)          # 剝單行註解(註解裡的「名字()」不是呼叫)
+    s=re.sub(r'/\*[\s\S]*?\*/', '', s)   # 剝區塊註解
     imported=set()
     for m in re.finditer(r"import \{([^}]+)\} from", s):
         for n in m.group(1).split(','):

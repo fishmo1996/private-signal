@@ -1832,3 +1832,43 @@ body.theme-dusk .inner-voice { background: rgba(255, 255, 255, 0.05); }
 .mc-play { display: inline-block; margin: 2px 0 6px; padding: 3px 10px; font-size: calc(12px * var(--fs-mult)); border: 1px solid rgba(128,128,128,.35); border-radius: 999px; background: rgba(255,255,255,.4); color: var(--ink); cursor: pointer; }
 body.theme-dusk .mc-play { background: rgba(255,255,255,.08); }
 .mc-body { font-size: calc(13px * var(--fs-mult)); line-height: 1.8; color: var(--ink-dim); }
+
+/* 備份黃燈 */
+.backup-warn { margin-top: 6px; padding: 8px 10px; border-radius: 8px; font-size: calc(12px * var(--fs-mult)); background: rgba(230, 180, 60, .16); border: 1px solid rgba(230, 180, 60, .4); color: var(--ink); }
+
+/* 心聲紀錄(O-1)與更新彈窗(O-2) */
+.iv-log { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow-y: auto; }
+.iv-log-item { text-align: left; border: 1px solid rgba(128,128,128,.2); border-radius: 10px; padding: 8px 10px; background: rgba(255,255,255,.25); cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
+body.theme-dusk .iv-log-item { background: rgba(255,255,255,.05); }
+.iv-log-head { font-size: 11px; color: var(--ink-faint); }
+.iv-log-body { font-size: calc(12px * var(--fs-mult)); color: var(--ink-dim); font-style: italic; }
+.changelog-list { margin: 8px 0 4px; padding-left: 20px; font-size: calc(13px * var(--fs-mult)); line-height: 1.9; }
+.iv-pick { margin: 3px 4px 3px 0; }
+
+/* 角色狀態(提案 M):名字下的小字簽名 */
+.char-status { display: block; font-size: 11px; color: var(--ink-faint); font-style: italic; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+
+/* 偷看手機(提案 K):手機截圖風卡片 */
+.pk-type-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.peek-card { border: 1px solid rgba(128,128,128,.22); border-radius: 12px; padding: 10px 12px; margin-top: 8px; background: rgba(255,255,255,.3); }
+body.theme-dusk .peek-card { background: rgba(255,255,255,.05); }
+.pk-head { font-size: 11px; color: var(--ink-faint); margin-bottom: 6px; }
+.pk-search { font-size: calc(13px * var(--fs-mult)); padding: 5px 2px; border-bottom: 1px dashed rgba(128,128,128,.18); }
+.pk-song { font-size: calc(13px * var(--fs-mult)); padding: 4px 2px; }
+.pk-reason { font-size: calc(12px * var(--fs-mult)); font-style: italic; color: var(--ink-dim); margin-top: 6px; }
+.pk-draft { margin: 6px 0; }
+.pk-draft-bubble { background: rgba(120,120,220,.12); border-radius: 10px 10px 10px 2px; padding: 7px 10px; font-size: calc(13px * var(--fs-mult)); }
+.pk-draft-note { font-size: 11px; font-style: italic; color: var(--ink-faint); margin: 2px 0 0 6px; }
+.pk-history { margin-top: 10px; }
+.pk-history summary { font-size: 12px; color: var(--ink-dim); cursor: pointer; }
+
+/* 桌面寵物(提案 L) */
+.desktop-pet { position: absolute; bottom: 6px; width: 56px; height: 46px; z-index: 1; cursor: pointer; transition: left 2.2s ease-in-out; pointer-events: auto; }
+.desktop-pet .pet-body, .desktop-pet .pet-body svg, .desktop-pet .pet-body img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.desktop-pet[data-pose="walk"] .pet-body { animation: pet-bob .5s ease-in-out infinite alternate; }
+.desktop-pet[data-pose="sit"] .pet-body { transform: translateY(4px); }
+.desktop-pet.pet-static { transition: none; }
+@keyframes pet-bob { from { transform: translateY(0); } to { transform: translateY(-3px); } }
+.pet-bubble { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%) scaleX(var(--flip,1)); margin-bottom: 4px; padding: 4px 9px; background: rgba(255,255,255,.92); color: #3a3330; border-radius: 10px; font-size: 11px; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+.desktop-pet[style*="scaleX(-1)"] .pet-bubble { transform: translateX(-50%) scaleX(-1); }
+@media (prefers-reduced-motion: reduce) { .desktop-pet { transition: none; } .desktop-pet .pet-body { animation: none !important; } }

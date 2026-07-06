@@ -8,5 +8,8 @@
   "defaultSettings": {
     "showTimestamps": true
   },
-  "version": "v54"
+  "version": "v59",
+  "changelog": [
+    "🐕 桌面寵物:主畫面來了一隻會走來走去的小狗,點牠會講話——設定裡可換成豬皮本尊的照片、改名字、編輯台詞"
+  ]
 }

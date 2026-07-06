@@ -5,7 +5,7 @@
  * 以確保未來換成真實 API 時,資料流不需要重寫。
  */
 
-import { getState, getRoom, getRoomMessages, getRoomCharacters } from './state.js';
+import { getState, getRoom, getRoomMessages, getRoomCharacters, getCharacter } from './state.js';
 import { matchEntries } from './worldbook.js';
 import { personaForRoom, getPersona } from './persona.js';
 import { sharedMemoriesFor, relativeTimeNote, anniversaryMemoryHits } from './memory.js';
@@ -200,6 +200,10 @@ export function buildPrompt({ character, roomId, innerVoiceOf = null }) {
 }${
   state.settings?.moodEmoji !== false && !character.noPhone
     ? ' 在整段輸出的最後另起一行加上「[心情:x]」,x 是最能代表你此刻對玩家心情的一個 emoji。'
+    : ''
+}${
+  state.settings?.charStatus !== false && !character.noPhone
+    ? ' 另外,你在通訊軟體上掛著一個所有人可見的狀態(像個性簽名)。僅在這次對話讓你的狀態「確實會改變」時,才在輸出最後另起一行加上「[狀態:一句話]」(15 字內)——多數回覆不需要。狀態是公開的,絕不可包含只有你和玩家兩人知道的私密細節。'
     : ''
 } 單則回覆長度上限約 ${maxReplyChars} 字。`,
     ...(room.authorNote?.trim()
@@ -541,4 +545,88 @@ function collectCrossRoomContext(character, currentRoomId) {
     }
   }
   return out;
+}
+
+/* ------------------------------------------------------------
+ * 提案 J:正文/群聊心聲建構器。
+ * 素材=該角色「本人知道的範圍」:他的私密記憶+圈子共享+該房可見素材+
+ * 歷史裁切到該則訊息。正文用劇情時間(不注入相對時間);群聊用現實時間。
+ * ------------------------------------------------------------ */
+export function buildRoomInnerVoicePrompt({ character, roomId, messageId }) {
+  const state = getState();
+  const room = getRoom(roomId);
+  if (!room || (room.type !== 'story' && room.type !== 'group')) return null;
+  const isStory = room.type === 'story';
+  const persona = personaForRoom(room);
+
+  let srcMsgs = getRoomMessages(roomId) || [];
+  const idx = srcMsgs.findIndex((mm) => mm.id === messageId);
+  if (idx >= 0) srcMsgs = srcMsgs.slice(0, idx + 1);
+  const recentMessages = budgetSlice(srcMsgs).slice().map((m) => ({
+    role: m.role === 'user' ? 'user' : 'assistant',
+    speaker: m.role === 'narrator' ? '旁白' : (m.role === 'user' ? (persona?.name || '玩家') : (getCharacter(m.senderId)?.name || '')),
+    content: m.content,
+  }));
+
+  const privates = state.memories.byCharacterId[character.id] || [];
+  const shared = sharedMemoriesFor(character.knownPersonaId || state.defaultPersonaId);
+  const roomMems = state.memories.byRoomId[roomId] || [];
+  const rt = { withRelativeTime: !isStory };
+
+  const system = [
+    `你是「${character.name}」。`,
+    `【角色描述】${character.description || '(未提供)'}`,
+    `【個性】${character.personality || '(未提供)'}`,
+    `【玩家】${persona?.name || '(未命名玩家)'}:${persona?.description || '(未提供描述)'}`,
+    `【${character.name} 的私密記憶(只有你自己知道)】\n${formatMemories(privates, rt)}`,
+    `【共享記憶】\n${formatMemories(shared, rt)}`,
+    ...(roomMems.length ? [`【本${isStory ? '場景' : '聊天室'}記憶】\n${formatMemories(roomMems)}`] : []),
+    ...(isStory && room.statusBar?.trim() ? [`【當前狀態(劇情時間/地點/狀態,以此為準)】${room.statusBar.trim()}`] : []),
+    ...(room.relationshipStage?.trim() ? [`【目前與玩家的關係階段】${room.relationshipStage.trim()}(背景理解,不要複述)`] : []),
+    `【任務】以下是${isStory ? '一段正文場景' : '一段群組聊天'}的紀錄(「旁白」是場景敘述)。請寫出紀錄最後那一刻,你(${character.name})心裡真正的想法——這一幕底下你沒說出口的部分(動作洩漏的、語氣藏著的、不敢講的)。第一人稱純內心獨白,100~200 字${isStory ? ',以劇情當下的時空為準,不要提及現實日期' : ''}。不要對任何人喊話、不要引號包裹、不要描述自己的動作、不要任何標記格式。輸出繁體中文。`,
+  ].join('\n\n');
+
+  return { system, messages: recentMessages, meta: { maxReplyChars: 300, roomType: room.type, mode: 'innerVoice' } };
+}
+
+/* ------------------------------------------------------------
+ * 提案 K:偷看角色手機。素材=該角色 DM 視角同構+他的日記。
+ * 三種快照:draft 未送出草稿 / search 搜尋紀錄 / playlist 最近播放。
+ * ------------------------------------------------------------ */
+export function buildPhonePeekPrompt({ character, peekType }) {
+  const state = getState();
+  const dmRoom = state.rooms.find((r) => r.type === 'dm' && !r.branchedFrom && r.participantIds.includes(character.id));
+  const persona = dmRoom ? personaForRoom(dmRoom) : getPersona(state.defaultPersonaId);
+  const privates = state.memories.byCharacterId[character.id] || [];
+  const shared = sharedMemoriesFor(character.knownPersonaId || state.defaultPersonaId);
+  const diaries = (state.diariesByCharacterId?.[character.id] || []).slice(0, 4)
+    .map((d) => `- ${String(d.content || '').slice(0, 120)}`).join('\n');
+  const recentMessages = dmRoom
+    ? budgetSlice(getRoomMessages(dmRoom.id)).slice(-24).map((m) => ({
+      role: m.role === 'user' ? 'user' : 'assistant',
+      speaker: m.role === 'user' ? (persona?.name || '玩家') : character.name,
+      content: m.content,
+    }))
+    : [];
+
+  const TASKS = {
+    draft: `【任務】想像你(${character.name})的手機訊息 App 裡,躺著幾則「打了又沒送出」的草稿。輸出 2~4 則:大多是想傳給${persona?.name || '玩家'}的,可以有一則是給你認識的其他人。每行一則,格式:草稿內容||一句沒送出的原因(內心註記)。草稿的語氣必須符合你平常的訊息風格與目前的關係階段;沒送出的原因要誠實(遲疑、害羞、覺得太黏、時機不對……)。`,
+    search: `【任務】輸出你(${character.name})手機瀏覽器「最近的搜尋紀錄」5~8 條,由最近到較早。每行一條搜尋關鍵字,像真人會打的那樣(可以口語、可以打錯重搜、可以好笑、可以洩露口是心非)。這些搜尋要反映你最近真正掛心的事。`,
+    playlist: `【任務】輸出你(${character.name})音樂 App 的「最近播放」5~6 首。每行一首,格式:歌名 — 歌手。歌名與歌手必須全部虛構,不可使用任何真實存在的歌曲或藝人;但要「聽起來像存在」,風格符合你的品味與此刻心境。最後另起一行,以「循環理由:」開頭,寫一句你此刻反覆播放這些歌的原因。`,
+  };
+
+  const system = [
+    `你是「${character.name}」。`,
+    `【角色描述】${character.description || '(未提供)'}`,
+    `【個性】${character.personality || '(未提供)'}`,
+    `【玩家】${persona?.name || '(未命名玩家)'}:${persona?.description || '(未提供描述)'}`,
+    `【${character.name} 的私密記憶(只有你自己知道)】\n${formatMemories(privates, { withRelativeTime: true })}`,
+    `【共享記憶】\n${formatMemories(shared, { withRelativeTime: true })}`,
+    ...(diaries ? [`【你最近的日記(你的私密視角)】\n${diaries}`] : []),
+    ...(dmRoom?.relationshipStage?.trim() ? [`【目前與玩家的關係階段】${dmRoom.relationshipStage.trim()}(背景理解,不要複述)`] : []),
+    TASKS[peekType] || TASKS.search,
+    '【格式】純文字,一行一項;不要編號、不要 markdown、不要引號包裹、不要任何說明或前後綴。輸出繁體中文。',
+  ].join('\n\n');
+
+  return { system, messages: recentMessages, meta: { maxReplyChars: 600, mode: 'phonePeek', peekType } };
 }

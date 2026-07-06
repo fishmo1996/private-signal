@@ -8,9 +8,9 @@
 import { getCharacter,
   getState, genId, persist, getRoom, getRoomMessages, getRoomCharacters,
 } from './state.js';
-import { buildPrompt, buildGroupPrompt, buildStoryPrompt, buildPeekPrompt } from './prompt.js';
+import { buildPrompt, buildGroupPrompt, buildStoryPrompt, buildPeekPrompt, buildRoomInnerVoicePrompt } from './prompt.js';
 import { getApiConfig, generateReply, stripNamePrefix, parseGroupReplies } from './api.js';
-import { extractVoiceTag, extractMoodTag } from './voice.js';
+import { extractVoiceTag, extractMoodTag, extractStatusTag } from './voice.js';
 import { anniversaryTextFor } from './album.js';
 import { anniversaryMemoryHits } from './memory.js';
 import { ttsAvailable } from './voice.js';
@@ -303,7 +303,9 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
         if (r.ok) {
           const md = extractMoodTag(stripNamePrefix(r.text, [character.name]));
           if (md.mood) { room.mood = { emoji: md.mood, at: Date.now() }; }
-          const vt = extractVoiceTag(md.content);
+          const st = extractStatusTag(md.content);
+          applyStatusTag(character, st.status);
+          const vt = extractVoiceTag(st.content);
           if (vt.voice || getState().settings.chatFeel === false) {
             // 語音訊息維持單則
             appendMessage(roomId, {
@@ -559,20 +561,46 @@ export async function selfChat(roomId, notify, opts = {}) {
  * ------------------------------------------------------------ */
 const innerVoiceBusy = new Set();
 
-export async function generateInnerVoice(roomId, messageId) {
+/** 提案 M:狀態落地(節流:3 小時內已更新過就丟棄,防模型鸚鵡成每回必發)。 */
+function applyStatusTag(character, statusText) {
+  if (!statusText || !character || character.noPhone) return;
+  const THROTTLE = 3 * 60 * 60 * 1000;
+  if (character.status?.at && Date.now() - character.status.at < THROTTLE) return;
+  character.status = { text: statusText, at: Date.now() };
+}
+
+export async function generateInnerVoice(roomId, messageId, characterId = null) {
   const room = getRoom(roomId);
-  if (!room || room.type !== 'dm') return { ok: false, message: '內心話目前只支援私訊' };
+  if (!room) return { ok: false, message: '找不到房間' };
+  if (room.type === 'peek') return { ok: false, message: '旁觀房不支援心聲' };
   const msg = (getRoomMessages(roomId) || []).find((m) => m.id === messageId);
-  if (!msg || msg.role !== 'character') return { ok: false, message: '只有角色的訊息有內心話' };
-  if (msg.innerVoice) return { ok: true, cached: true, text: msg.innerVoice };
-  if (innerVoiceBusy.has(messageId)) return { ok: false, message: '生成中…' };
-  innerVoiceBusy.add(messageId);
+  if (!msg) return { ok: false, message: '找不到訊息' };
+
+  // 目標角色:角色訊息=發話者本人;正文旁白=呼叫端指定
+  let character = null;
+  if (msg.role === 'character') {
+    character = room.type === 'dm' ? getRoomCharacters(room)[0] : getCharacter(msg.senderId);
+  } else if (msg.role === 'narrator' && room.type === 'story' && characterId) {
+    character = getCharacter(characterId);
+  }
+  if (!character) return { ok: false, message: msg.role === 'narrator' ? '請選擇要窺探的角色' : '只有角色的訊息有心聲' };
+
+  // 快取:角色訊息單欄;旁白多人欄
+  if (msg.role === 'character' && msg.innerVoice) return { ok: true, cached: true, text: msg.innerVoice };
+  if (msg.role === 'narrator' && msg.innerVoices?.[character.id]) {
+    return { ok: true, cached: true, text: msg.innerVoices[character.id] };
+  }
+  const busyKey = `${messageId}:${character.id}`;
+  if (innerVoiceBusy.has(busyKey)) return { ok: false, message: '生成中…' };
+  innerVoiceBusy.add(busyKey);
   try {
-    const character = getRoomCharacters(room)[0];
     const cfg = getApiConfig();
     let text;
     if (cfg.useRealApi && cfg.apiKey && cfg.model) {
-      const prompt = buildPrompt({ character, roomId, innerVoiceOf: messageId });
+      const prompt = room.type === 'dm'
+        ? buildPrompt({ character, roomId, innerVoiceOf: messageId })
+        : buildRoomInnerVoicePrompt({ character, roomId, messageId });
+      if (!prompt) return { ok: false, message: '這個房型不支援心聲' };
       const r = await generateReply(cfg, prompt, { tier: 'secondary' });
       if (!r.ok) return { ok: false, message: r.message };
       text = stripNamePrefix(r.text, [character.name]).trim();
@@ -580,11 +608,16 @@ export async function generateInnerVoice(roomId, messageId) {
     } else {
       text = '(嘴上說得輕鬆,其實剛剛心跳快得不像話。希望沒被發現。)';
     }
-    msg.innerVoice = text;
+    if (msg.role === 'character') {
+      msg.innerVoice = text;
+    } else {
+      msg.innerVoices = msg.innerVoices || {};
+      msg.innerVoices[character.id] = text;
+    }
     await persist();
     return { ok: true, text };
   } finally {
-    innerVoiceBusy.delete(messageId);
+    innerVoiceBusy.delete(busyKey);
   }
 }
 
@@ -766,7 +799,9 @@ export async function refreshChats(opts = {}) {
 
   const mdP = extractMoodTag(content);
   if (mdP.mood) { room.mood = { emoji: mdP.mood, at: Date.now() }; }
-  const vtP = extractVoiceTag(mdP.content);
+  const stP = extractStatusTag(mdP.content);
+  applyStatusTag(character, stP.status);
+  const vtP = extractVoiceTag(stP.content);
   appendMessage(room.id, {
     role: 'character', senderId: character.id, content: vtP.content,
     ...(isCall

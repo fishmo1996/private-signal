@@ -38,6 +38,8 @@ import {
 } from './voice.js';
 import { exportRoomJson, parseRoomImport, importRoom } from './roombackup.js';
 import { exportStoryBook } from './bookexport.js';
+import { generatePhonePeek, phonePeeksFor, PEEK_TYPES } from './phonepeek.js';
+import { mountPet, unmountPet, petSettings } from './pet.js';
 import { exportCharacterPack, exportCharacterCardV2, parseCharacterImport, importCharacter } from './charcard.js';
 import { exportStateJson, importStateJson } from './state.js';
 import {
@@ -241,6 +243,7 @@ export function renderAll() {
 function renderPhone() {
   els.phone.style.setProperty('--accent', currentAccent());
   const view = getView();
+  if (view !== 'home') unmountPet(); // 離開主畫面必清計時器(clockTimer 同款紀律)
 
   switch (view) {
     case 'lock': renderLockScreen(); break;
@@ -314,6 +317,7 @@ function renderLockScreen() {
 function renderHome() {
   els.phoneScreen.innerHTML = buildHomeHTML();
   applyPhoneBackground(els.phoneScreen.querySelector('.phone-home'));
+  mountPet(els.phoneScreen.querySelector('.phone-home')); // 提案 L:寵物只住主畫面
 
   els.phoneScreen.querySelectorAll('[data-go]').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -438,6 +442,7 @@ function rowOfDm(c, dm) {
         ${avatarHtml(c)}
         <span class="list-main">
           <span class="list-title">${esc(c.name)}${dm.branchedFrom ? ' <span class="branch-tag">⑂分岔</span>' : ''}${getState().settings.moodEmoji !== false && dm.mood?.emoji ? ` ${dm.mood.emoji}` : ''}${dm.unread ? ' <span class="unread-dot" aria-label="未讀"></span>' : ''}</span>
+          ${c.status?.text ? `<span class="char-status">${esc(c.status.text)}</span>` : ''}
           <span class="list-preview">${esc(preview)}</span>
         </span>
         ${last ? `<span class="list-time">${fmtTime(last.createdAt)}</span>` : ''}
@@ -592,8 +597,10 @@ function renderRoomView() {
   els.phoneScreen.querySelector('#btnRoomMore').addEventListener('click', () => {
     const items = [
       ...(room.type === 'dm' ? [['diary', '📔 日記']] : [['members', '👥 成員']]),
+      ...(room.type === 'dm' && !getRoomCharacters(room)[0]?.noPhone ? [['peekphone', '👀 偷看他的手機']] : []),
       ['memory', `🧠 記憶${messagesSinceSummary(room.id).length >= 30 ? '(建議摘要)' : ''}`],
       ...(room.type === 'story' ? [['book', '📖 匯出成書(離線可讀)']] : []),
+      ...(room.type !== 'peek' ? [['ivlog', '👁 心聲紀錄']] : []),
       ['note', `✏️ 備註與關係階段${(room.authorNote?.trim() || room.relationshipStage?.trim()) ? ' ●' : ''}`],
       ...(deletable ? [['delete', '🗑 刪除此對話']] : []),
     ];
@@ -616,6 +623,11 @@ function renderRoomView() {
           else if (act === 'diary') {
             const dmChar = getRoomCharacters(room)[0];
             if (dmChar) { await navigate('character-diary', { characterId: dmChar.id }); renderAll(); }
+          } else if (act === 'peekphone') {
+            const pc = getRoomCharacters(room)[0];
+            if (pc) openPhonePeekModal(pc);
+          } else if (act === 'ivlog') {
+            openInnerVoiceLog(room);
           } else if (act === 'book') {
             const bookR = exportStoryBook(room.id);
             if (!bookR) { alert('這個房間沒有可匯出的內容'); return; }
@@ -750,7 +762,7 @@ function renderRoomView() {
     });
   });
   if (input) input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !isTouchDevice()) {
       e.preventDefault();
       doSend();
     }
@@ -799,7 +811,8 @@ function renderMessages() {
     const rememberBtn = `<button class="remember-btn" data-remember="${esc(m.id)}" aria-label="記住這件事">記住</button>`
       + `<button class="remember-btn" data-msg-edit="${esc(m.id)}" aria-label="編輯訊息">編輯</button>`
       + `<button class="remember-btn" data-msg-branch="${esc(m.id)}" aria-label="從這裡分岔">⑂</button>`
-      + (room.type === 'dm' && m.role === 'character' ? `<button class="remember-btn" data-inner-voice="${esc(m.id)}" aria-label="內心話">👁${m.innerVoice ? '' : '?'}</button>` : '')
+      + ((((room.type === 'dm' || room.type === 'group' || room.type === 'story') && m.role === 'character') || (room.type === 'story' && m.role === 'narrator'))
+        ? `<button class="remember-btn" data-inner-voice="${esc(m.id)}" aria-label="心聲">👁${(m.innerVoice || (m.innerVoices && Object.keys(m.innerVoices).length)) ? '' : '?'}</button>` : '')
       + `<button class="remember-btn danger" data-msg-del="${esc(m.id)}" aria-label="刪除訊息">刪除</button>`;
 
     if (m.role === 'system') {
@@ -810,6 +823,7 @@ function renderMessages() {
       return `
         <div class="msg-narrator">
           <div class="narrator-body">${esc(m.content).replaceAll('\n', '<br>')}${choicesHtml}</div>
+          ${Object.entries(m.innerVoices || {}).map(([cid, txt]) => `<div class="inner-voice" data-iv-card="${esc(m.id)}:${esc(cid)}" hidden><b>${esc(getCharacter(cid)?.name || '?')}</b>:${esc(txt).replaceAll('\n', '<br>')}</div>`).join('')}
           <div class="msg-meta">${time}${rememberBtn}${speakBtn}</div>
         </div>`;
     }
@@ -950,6 +964,8 @@ function renderMessages() {
   wrap.querySelectorAll('[data-inner-voice]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const mid = btn.dataset.innerVoice;
+      const msgIv = (getState().messagesByRoom[room.id] || []).find((x) => x.id === mid);
+      if (msgIv && msgIv.role === 'narrator') { openInnerVoicePicker(room, msgIv); return; }
       const card = wrap.querySelector(`[data-iv-card="${mid}"]`);
       if (card) { card.hidden = !card.hidden; return; }
       btn.disabled = true;
@@ -1316,7 +1332,7 @@ function renderSocialPost() {
 
   sendBtn.addEventListener('click', doComment);
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !isTouchDevice()) {
       e.preventDefault();
       doComment();
     }
@@ -2042,6 +2058,11 @@ function openCardPreviewModal(card) {
   });
 }
 
+/** 觸控裝置判定(提案 N):粗指標=手機/平板;jsdom 無 matchMedia 時回 false。 */
+function isTouchDevice() {
+  try { return globalThis.matchMedia?.('(pointer: coarse)')?.matches === true; } catch { return false; }
+}
+
 function downloadJson(text, filename) {
   const blob = new Blob([text], { type: 'application/json' });
   const a = document.createElement('a');
@@ -2503,6 +2524,18 @@ function renderSettings() {
         <span class="setting-label">角色心情小表情<br><span class="setting-hint">DM 標題與好友列顯示他此刻對你的心情(模型每則順手標記)</span></span>
         <input type="checkbox" id="chkMoodEmoji" ${state.settings.moodEmoji !== false ? 'checked' : ''}>
       </label>
+      <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:6px">
+        <span class="setting-label">🐕 桌面寵物<br><span class="setting-hint">住在主畫面底部,會走來走去;點牠會講話。零 API 純裝飾。建議上傳去背 PNG(站/走/坐最多三張,只給一張全狀態共用)。</span></span>
+        <label class="check-field"><input type="checkbox" id="chkPet" ${petSettings().enabled ? 'checked' : ''}> 啟用</label>
+        <input id="petName" maxlength="12" value="${esc(petSettings().name || '')}" placeholder="名字(例:豬皮)">
+        <div class="pk-type-row">
+          <label class="ghost-btn slim">站姿圖<input type="file" id="petImgStand" accept="image/*" hidden></label>
+          <label class="ghost-btn slim">走路圖<input type="file" id="petImgWalk" accept="image/*" hidden></label>
+          <label class="ghost-btn slim">坐姿圖<input type="file" id="petImgSit" accept="image/*" hidden></label>
+          <button class="ghost-btn slim" id="petImgClear">還原預設狗</button>
+        </div>
+        <textarea id="petLines" rows="3" placeholder="台詞池,一行一句">${esc((petSettings().lines || []).join('\n'))}</textarea>
+      </div>
       <label class="setting-row">
         <span class="setting-label">內建正文導演指令<br><span class="setting-hint">場景敘事自動帶導演配方:多人=反應分工不撞戲,單人=內外落差深描;含感官錨點、長度地板(英文注入省 token,輸出仍為繁中)</span></span>
         <input type="checkbox" id="chkStoryDirector" ${state.settings.storyDirector !== false ? 'checked' : ''}>
@@ -2528,6 +2561,12 @@ function renderSettings() {
       <button class="ghost-btn slim" id="btnImportRoom">匯入聊天室備份</button>
       <input type="file" id="roomFile" accept=".json,application/json" hidden>
       <div class="panel-note">所有資料只存在這台電腦的瀏覽器(IndexedDB)裡,不會傳到任何地方。建議定期匯出備份,避免清瀏覽器快取時遺失。<br><strong>備份不包含 API 金鑰;匯入到新裝置後請自行重新輸入。</strong></div>
+      ${(() => {
+        const at = state.lastBackupAt;
+        const days = at ? Math.floor((Date.now() - at) / 86400000) : null;
+        if (at && days < 7) return `<div class="panel-note">上次備份:${days === 0 ? '今天' : `${days} 天前`} ✓</div>`;
+        return `<div class="backup-warn">⚠ ${at ? `已 ${days} 天沒備份` : '從未備份'}——iOS 有權在空間吃緊時清掉網站資料,備份是唯一保險。</div>`;
+      })()}
       <div class="form-actions">
         <button class="primary-btn slim" id="btnExport">匯出全域備份</button>
         <button class="ghost-btn slim" id="btnImport">匯入備份</button>
@@ -2724,6 +2763,35 @@ function renderSettings() {
     await persist();
     renderAll();
   });
+  els.phoneScreen.querySelector('#chkPet')?.addEventListener('change', async (e) => {
+    petSettings().enabled = e.target.checked;
+    await persist();
+  });
+  els.phoneScreen.querySelector('#petName')?.addEventListener('change', async (e) => {
+    petSettings().name = e.target.value.trim();
+    await persist();
+  });
+  els.phoneScreen.querySelector('#petLines')?.addEventListener('change', async (e) => {
+    petSettings().lines = e.target.value.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 12);
+    await persist();
+  });
+  for (const [inputId, key] of [['petImgStand', 'imgStand'], ['petImgWalk', 'imgWalk'], ['petImgSit', 'imgSit']]) {
+    els.phoneScreen.querySelector(`#${inputId}`)?.addEventListener('change', async (e) => {
+      const f = e.target.files?.[0];
+      if (!f) return;
+      try {
+        const { compressAvatar } = await import('./image.js');
+        petSettings()[key] = await compressAvatar(f, 128);
+        await persist();
+        alert('寵物圖已更新');
+      } catch (err) { alert(`圖片處理失敗:${err.message}`); }
+    });
+  }
+  els.phoneScreen.querySelector('#petImgClear')?.addEventListener('click', async () => {
+    Object.assign(petSettings(), { imgStand: null, imgWalk: null, imgSit: null });
+    await persist();
+    alert('已還原內建簡筆狗');
+  });
   els.phoneScreen.querySelector('#chkStoryDirector').addEventListener('change', async (e) => {
     state.settings.storyDirector = e.target.checked;
     await persist();
@@ -2781,6 +2849,8 @@ function renderSettings() {
     a.download = `private-signal-backup-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
+    state.lastBackupAt = Date.now();
+    persist().then(() => renderPhone());
   });
   const importFile = els.phoneScreen.querySelector('#importFile');
   els.phoneScreen.querySelector('#btnImport').addEventListener('click', () => importFile.click());
@@ -3829,6 +3899,140 @@ function openRoomMembersModal(room) {
       root.querySelectorAll('[data-member-out]').forEach((b) => b.addEventListener('click', () => doChange(b.dataset.memberOut, false)));
     },
   });
+}
+
+/** 提案 K:快照分型渲染(手機截圖風;全部過 esc)。 */
+function peekCardHtml(entry) {
+  const lines = String(entry.content || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const when = new Date(entry.createdAt).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  let body = '';
+  if (entry.type === 'draft') {
+    body = lines.map((l) => {
+      const [draft, note] = l.split('||');
+      return `<div class="pk-draft"><div class="pk-draft-bubble">${esc(draft || l)}</div>${note ? `<div class="pk-draft-note">${esc(note)}</div>` : ''}</div>`;
+    }).join('');
+  } else if (entry.type === 'playlist') {
+    body = lines.map((l) => {
+      if (/^循環理由[::]/.test(l)) return `<div class="pk-reason">${esc(l)}</div>`;
+      return `<div class="pk-song">♪ ${esc(l)}</div>`;
+    }).join('');
+  } else {
+    body = lines.map((l) => `<div class="pk-search">🔍 ${esc(l)}</div>`).join('');
+  }
+  return `<div class="peek-card"><div class="pk-head">${PEEK_TYPES[entry.type]?.label || entry.type} · ${esc(when)}</div>${body}</div>`;
+}
+
+/** 提案 K:偷看手機 modal——三種快照+歷史。 */
+export function openPhonePeekModal(character, freshEntry = null) {
+  const history = phonePeeksFor(character.id);
+  openModal(`
+    <h3>👀 偷看${esc(character.name)}的手機</h3>
+    <div class="panel-note">選一種快照。他不會知道。(一次一則生成,走次要模型)</div>
+    <div class="pk-type-row">
+      ${Object.entries(PEEK_TYPES).map(([k, v]) => `<button class="ghost-btn slim" data-pk-type="${k}">${v.label}</button>`).join('')}
+    </div>
+    <div id="pkResult">${freshEntry ? peekCardHtml(freshEntry) : ''}</div>
+    ${history.length ? `<details class="pk-history"${freshEntry ? '' : ' open'}><summary>歷史快照(${history.length})</summary>${history.map(peekCardHtml).join('')}</details>` : ''}`, {
+    onOpen(root) {
+      root.querySelectorAll('[data-pk-type]').forEach((b) => b.addEventListener('click', async () => {
+        b.disabled = true;
+        const orig = b.textContent;
+        b.textContent = '…窺看中';
+        const r = await generatePhonePeek(character.id, b.dataset.pkType);
+        if (!r.ok) { alert(r.message); b.disabled = false; b.textContent = orig; return; }
+        closeModal();
+        openPhonePeekModal(character, r.entry);
+      }));
+    },
+  });
+}
+
+/** 提案 J:旁白訊息的心聲選擇器——這一幕想窺探誰? */
+function openInnerVoicePicker(room, msg) {
+  const chars = getRoomCharacters(room);
+  openModal(`
+    <h3>👁 窺探這一幕的心聲</h3>
+    <div class="panel-note">選一位角色,看他此刻沒說出口的部分。已生成的免費展開。</div>
+    <div class="check-list">
+      ${chars.map((c) => `<button class="ghost-btn slim iv-pick" data-iv-pick="${esc(c.id)}">${esc(c.name)}${msg.innerVoices?.[c.id] ? ' ✓' : ''}</button>`).join('')}
+    </div>`, {
+    onOpen(root) {
+      root.querySelectorAll('[data-iv-pick]').forEach((b) => b.addEventListener('click', async () => {
+        const cid = b.dataset.ivPick;
+        if (msg.innerVoices?.[cid]) {
+          closeModal();
+          const card = document.getElementById('messages')?.querySelector(`[data-iv-card="${msg.id}:${cid}"]`);
+          if (card) card.hidden = !card.hidden;
+          return;
+        }
+        b.disabled = true; b.textContent = '…';
+        const r = await generateInnerVoice(room.id, msg.id, cid);
+        if (!r.ok) { alert(r.message); b.disabled = false; return; }
+        closeModal();
+        renderMessages();
+        const card = document.getElementById('messages')?.querySelector(`[data-iv-card="${msg.id}:${cid}"]`);
+        if (card) card.hidden = false;
+      }));
+    },
+  });
+}
+
+/** 提案 O-1:本房心聲紀錄總覽。 */
+export function openInnerVoiceLog(room) {
+  const msgs = getRoomMessages(room.id) || [];
+  const entries = [];
+  for (const m of msgs) {
+    if (m.innerVoice) {
+      const who = m.senderId ? (getCharacter(m.senderId)?.name || '') : (getRoomCharacters(room)[0]?.name || '');
+      entries.push({ mid: m.id, key: m.id, who, at: m.createdAt, text: m.innerVoice });
+    }
+    for (const [cid, txt] of Object.entries(m.innerVoices || {})) {
+      entries.push({ mid: m.id, key: `${m.id}:${cid}`, who: getCharacter(cid)?.name || '?', at: m.createdAt, text: txt });
+    }
+  }
+  openModal(`
+    <h3>👁 心聲紀錄</h3>
+    ${entries.length ? `<div class="iv-log">${entries.map((e) => `
+      <button class="iv-log-item" data-iv-jump="${esc(e.mid)}" data-iv-key="${esc(e.key)}">
+        <span class="iv-log-head">${esc(e.who)} · ${fmtTime(e.at)}</span>
+        <span class="iv-log-body">${esc(firstLine(e.text, 60))}</span>
+      </button>`).join('')}</div>` : '<div class="panel-note">還沒有任何心聲。在訊息上按 👁 窺探第一則吧。</div>'}`, {
+    onOpen(root) {
+      root.querySelectorAll('[data-iv-jump]').forEach((b) => b.addEventListener('click', () => {
+        closeModal();
+        const wrap = document.getElementById('messages');
+        const card = wrap?.querySelector(`[data-iv-card="${b.dataset.ivKey}"]`);
+        if (card) card.hidden = false;
+        const row = wrap?.querySelector(`[data-msg-branch="${b.dataset.ivJump}"]`)?.closest('.msg-row, .msg-narrator');
+        row?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+      }));
+    },
+  });
+}
+
+/** 提案 O-2:版本更新彈窗(每版一次)。 */
+export function maybeShowChangelog(changelog = []) {
+  const state = getState();
+  const ver = String(state.appVersion || '');
+  if (!ver || state.settings.lastSeenVersion === ver) return false;
+  if (!Array.isArray(changelog) || !changelog.length) {
+    state.settings.lastSeenVersion = ver;
+    persist();
+    return false;
+  }
+  openModal(`
+    <h3>🔔 更新到 ${esc(ver)}</h3>
+    <ul class="changelog-list">${changelog.map((c) => `<li>${esc(String(c))}</li>`).join('')}</ul>
+    <div class="form-actions"><button class="primary-btn slim" id="clOk">知道了</button></div>`, {
+    onOpen(root) {
+      root.querySelector('#clOk').addEventListener('click', async () => {
+        state.settings.lastSeenVersion = ver;
+        await persist();
+        closeModal();
+      });
+    },
+  });
+  return true;
 }
 
 /** 作者備註 modal:綁在單一房間、注入 prompt 尾端的導演指令。 */
