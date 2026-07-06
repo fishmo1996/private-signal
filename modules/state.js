@@ -41,8 +41,8 @@ function createInitialState(cfg) {
       byRoomId: {},
     },
     settings: {
-      showLockScreen: false,  // 預設關閉:主畫面已內建大時鐘(可在設定開啟傳統鎖屏)
-      resumeLastRoom: false,   // 重新開啟時回到上次聊天室(預設關閉:一律先進主畫面)
+      showLockScreen: false,  // 預設關閉：主畫面已內建大時鐘(可在設定開啟傳統鎖屏)
+      resumeLastRoom: false,   // 重新開啟時回到上次聊天室(預設關閉：一律先進主畫面)
       ...(cfg.defaultSettings || {}),
     },
   };
@@ -67,7 +67,7 @@ function migrate(s) {
   if (s.settings.resumeLastRoom === undefined) s.settings.resumeLastRoom = false;
   if (!s.settings.theme) s.settings.theme = 'dusk';        // dusk 暮霧深色 | sage 青霧淺綠
   if (s.settings.storyFormat === undefined) {
-    s.settings.storyFormat = '玩家輸入中,括號()內為台詞,括號外為動作與敘述。你的輸出以第三人稱小說筆法呈現,角色對話用「」引號,不要模仿玩家的括號格式。';
+    s.settings.storyFormat = '玩家輸入中，括號()內為台詞，括號外為動作與敘述。你的輸出以第三人稱小說筆法呈現，角色對話用「」引號，不要模仿玩家的括號格式。';
   }
   if (s.settings.autoPostCooldownMin === undefined) s.settings.autoPostCooldownMin = 10;
   if (s.settings.globalPrompt === undefined) s.settings.globalPrompt = '';
@@ -75,16 +75,23 @@ function migrate(s) {
   if (s.settings.showStatusCard === undefined) s.settings.showStatusCard = true;
   if (s.settings.chatFeel === undefined) s.settings.chatFeel = true;   // DM 聊天感:1~3 則短訊、口語、去旁白
   if (s.settings.moodEmoji === undefined) s.settings.moodEmoji = true; // DM 標題列的角色當下心情小表情
-  if (s.settings.storyDirector === undefined) s.settings.storyDirector = true; // 內建正文導演指令(單/多人自動切換,英文省 token)
+  if (s.settings.storyDirector === undefined) s.settings.storyDirector = true; // 內建正文導演指令(單/多人自動切換，英文省 token)
   if (s.settings.secondaryForSocialDiary === undefined) s.settings.secondaryForSocialDiary = false; // 社群發文/留言與日記走次要模型
   if (s.lastBackupAt === undefined) s.lastBackupAt = null; // 上次全域備份時間(黃燈提醒用)
   if (s.settings.lastSeenVersion === undefined) s.settings.lastSeenVersion = ''; // 更新彈窗(O-2)
-  // 提案 L:settings.pet 由 pet.js petSettings() 懶初始化,不在此硬塞(避免預設台詞雙處維護)
+  // 提案 L:settings.pet 由 pet.js petSettings() 懶初始化，不在此硬塞(避免預設台詞雙處維護)
   for (const ps of s.personas || []) {
     if (ps.label === undefined) ps.label = '';
   }
   for (const ch of s.characters || []) {
     if (ch.status === undefined) ch.status = null; // 提案 M:通訊軟體狀態 {text, at}
+    if (ch.label === undefined) ch.label = ''; // v61:備註標籤(只顯示，絕不進任何 prompt;同 persona.label 規矩)
+  }
+  // v61:世界書條目補次要關鍵字(selective 觸發；空=行為與舊版完全相同)
+  for (const wb of s.worldbooks || []) {
+    for (const e of wb.entries || []) {
+      if (!Array.isArray(e.secondaryKeywords)) e.secondaryKeywords = [];
+    }
   }
   {
     // 提案 C:記憶補 eventDate(由 createdAt 導出;annualDate 選填不回填)
@@ -106,9 +113,9 @@ function migrate(s) {
     // 首次建立時附兩個範例模組(預設關閉),當作範本
     s.settings.styleModules = [
       { id: `sm_${Date.now().toString(36)}a`, name: '漫才模式', enabled: false,
-        content: '對話帶漫才式節奏:有人裝傻、有人吐槽,吐槽要快、狠、好笑;日常場景可以自然歪樓再拉回來。' },
+        content: '對話帶漫才式節奏：有人裝傻、有人吐槽，吐槽要快、狠、好笑；日常場景可以自然歪樓再拉回來。' },
       { id: `sm_${Date.now().toString(36)}b`, name: '戀愛張力', enabled: false,
-        content: '增加曖昧與戀愛張力:多寫視線、距離、欲言又止的瞬間;推進要慢燒,情感變化要有鋪陳,不要突然告白。' },
+        content: '增加曖昧與戀愛張力：多寫視線、距離、欲言又止的瞬間；推進要慢燒，情感變化要有鋪陳，不要突然告白。' },
     ];
   }
   if (s.socialLastRefresh === undefined) s.socialLastRefresh = 0;
@@ -133,7 +140,7 @@ function migrate(s) {
   if (s.settings.bgImage === undefined) s.settings.bgImage = null;
   if (s.player && s.player.avatarImage === undefined) s.player.avatarImage = null;
 
-  // 多人設:從舊的 player 資料建立預設人設(只做一次,非破壞性)
+  // 多人設：從舊的 player 資料建立預設人設(只做一次，非破壞性)
   if (!Array.isArray(s.personas)) s.personas = [];
   if (!s.personas.length) {
     s.personas.push({
@@ -204,7 +211,7 @@ function migrate(s) {
     const room = (s.rooms || []).find((r) => r.id === s.currentRoomId);
     s.phoneView = room && room.type === 'story' ? 'story-room' : 'chat-room';
   }
-  // 防禦:任何無法辨識的頁面值,一律安全退回主畫面(只改頁面指標,不動資料)
+  // 防禦：任何無法辨識的頁面值，一律安全退回主畫面(只改頁面指標，不動資料)
   const KNOWN_VIEWS = [
     'home', 'chat-friends', 'chat-rooms', 'chat-peek', 'chat-room', 'social-feed', 'social-post',
     'story-list', 'story-room', 'people', 'people-character', 'settings',
@@ -231,21 +238,21 @@ export async function initState(loadedConfig) {
     return state;
   }
 
-  // 目前資料庫確實沒有資料:先安全搜尋其他可能的舊資料庫名稱(唯讀,不動來源)。
+  // 目前資料庫確實沒有資料：先安全搜尋其他可能的舊資料庫名稱(唯讀，不動來源)。
   const legacy = await findLegacyState();
   if (legacy) {
     state = migrate(legacy.state);
-    await persist(); // 複製一份到目前資料庫;來源資料庫原封不動
+    await persist(); // 複製一份到目前資料庫；來源資料庫原封不動
     return state;
   }
 
-  // 真的完全沒有任何舊資料,才建立初始 state(同樣過一次 migrate,確保欄位齊全)。
+  // 真的完全沒有任何舊資料，才建立初始 state(同樣過一次 migrate,確保欄位齊全)。
   state = migrate(createInitialState(config));
   await persist();
   return state;
 }
 
-/** 取得目前的 state 物件(直接引用,修改後請呼叫 persist)。 */
+/** 取得目前的 state 物件(直接引用，修改後請呼叫 persist)。 */
 export function getState() {
   return state;
 }
@@ -292,7 +299,7 @@ export function getRoomCharacters(room) {
 }
 
 /* ------------------------------------------------------------
- * 全域備份:匯出/匯入整份 state(含角色、對話、社群、記憶、世界書、設定)
+ * 全域備份：匯出/匯入整份 state(含角色、對話、社群、記憶、世界書、設定)
  * ------------------------------------------------------------ */
 
 export function exportStateJson() {
@@ -329,7 +336,7 @@ export async function importStateJson(jsonText) {
   if (!candidate || !Array.isArray(candidate.characters) || !Array.isArray(candidate.rooms)) {
     throw new Error('備份檔結構不符(缺少 characters / rooms)');
   }
-  // 保留本機已輸入的 API 金鑰:備份不含機密,匯入不得清空目前裝置上的 key。
+  // 保留本機已輸入的 API 金鑰：備份不含機密，匯入不得清空目前裝置上的 key。
   const localKey = state?.apiConfig?.apiKey || '';
   const localPresetKeys = (state?.apiConfig?.presets || []).map((p) => p?.apiKey || '');
 

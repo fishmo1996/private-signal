@@ -1,11 +1,11 @@
 /**
  * modules/api.js
  * API / LLM 連線設定層。
- * 注意:目前「對話回覆」仍是本機 mock;這裡先提供設定介面、連線測試與模型列表,
+ * 注意：目前「對話回覆」仍是本機 mock;這裡先提供設定介面、連線測試與模型列表,
  * 讓之後串接時 buildPrompt → 真實 API 只差最後一步。
  *
  * 金鑰只存在本機瀏覽器的 IndexedDB,不會上傳任何地方;
- * 但若日後部署到 GitHub Pages 供他人使用,請改走 serverless proxy,勿讓金鑰出現在前端。
+ * 但若日後部署到 GitHub Pages 供他人使用，請改走 serverless proxy,勿讓金鑰出現在前端。
  */
 
 import { getState, persist } from './state.js';
@@ -31,15 +31,15 @@ export function defaultApiConfig() {
     provider: 'openai',
     apiKey: '',
     model: '',
-    secondaryModel: '',          // 次要模型(同供應商同金鑰;空=一切照舊全走主要)
+    secondaryModel: '',          // 次要模型(同供應商同金鑰；空=一切照舊全走主要)
     baseUrl: '',                 // custom 供應商用
     maxReplyChars: { dm: 800, group: 1200, story: 4000 }, // 每模式一則回覆的字數上限
     contextBudget: 20000,        // 上下文預算(字數):對話歷史由新到舊裝進 prompt,裝滿即止
-    useRealApi: false,           // 總開關:開啟後對話使用真實 AI
-    modelList: [],               // 「取得最新模型」的快取,供下拉選單使用
-    temperature: 1.0,            // 溫度:創作建議 0.9~1.2
+    useRealApi: false,           // 總開關：開啟後對話使用真實 AI
+    modelList: [],               // 「取得最新模型」的快取，供下拉選單使用
+    temperature: 1.0,            // 溫度：創作建議 0.9~1.2
     topP: 0.95,
-    thinkingBudget: '',          // Gemini 思考預算:留空=模型預設,0=關閉思考(省額度)
+    thinkingBudget: '',          // Gemini 思考預算：留空=模型預設,0=關閉思考(省額度)
     safetyLevel: 'default',      // Gemini 內容安全:default | relaxed | none(官方 safetySettings 參數)
     presets: [null, null, null], // P1~P3:{name, provider, apiKey, model, baseUrl}
   };
@@ -91,7 +91,7 @@ function baseOf(cfg) {
 
 /**
  * 取得模型列表。回傳 {ok, models?, message?}。
- * 部分供應商可能擋瀏覽器直連(CORS),失敗時會誠實回報,不影響手動填模型名。
+ * 部分供應商可能擋瀏覽器直連(CORS),失敗時會誠實回報，不影響手動填模型名。
  */
 export async function listModels(cfg = getApiConfig()) {
   const base = baseOf(cfg);
@@ -124,14 +124,14 @@ export async function listModels(cfg = getApiConfig()) {
   }
 }
 
-/** 連線測試:能列出模型就算通。 */
+/** 連線測試：能列出模型就算通。 */
 export async function testConnection(cfg = getApiConfig()) {
   if (!cfg.apiKey && cfg.provider !== 'custom') {
     return { ok: false, message: '請先填入 API 金鑰' };
   }
   const r = await listModels(cfg);
   return r.ok
-    ? { ok: true, message: `連線成功,共 ${r.models.length} 個模型可用` }
+    ? { ok: true, message: `連線成功，共 ${r.models.length} 個模型可用` }
     : { ok: false, message: r.message };
 }
 
@@ -139,7 +139,7 @@ export async function testConnection(cfg = getApiConfig()) {
  * 真實 AI 回覆(目前僅私訊 DM 使用)。
  * ------------------------------------------------------------ */
 
-/** 模型名稱正規化:去空白、去 models/ 前綴(Gemini 清單常見)。 */
+/** 模型名稱正規化：去空白、去 models/ 前綴(Gemini 清單常見)。 */
 export function normalizeModel(provider, model) {
   let m = String(model || '').trim();
   if (provider === 'gemini') m = m.replace(/^models\//, '');
@@ -152,7 +152,7 @@ function parseDataUrl(dataUrl) {
   return m ? { mimeType: m[1], data: m[2] } : null;
 }
 
-/** 依供應商組出聊天請求(純函式,便於測試)。 */
+/** 依供應商組出聊天請求(純函式，便於測試)。 */
 export function buildChatRequest(cfg, { system, messages, meta }) {
   const base = cfg.provider === 'custom'
     ? String(cfg.baseUrl || '').replace(/\/+$/, '')
@@ -269,19 +269,19 @@ export function extractReplyText(provider, data) {
  * 失敗時誠實回報(429=額度限制、401/403=金鑰問題),不丟例外。
  */
 export async function generateReply(cfg, prompt, opts = {}) {
-  // tier: 'secondary' 且有設定次要模型時,換模型不換供應商/金鑰(F 案:摘要等雜務走便宜模型)
+  // tier: 'secondary' 且有設定次要模型時，換模型不換供應商/金鑰(F 案：摘要等雜務走便宜模型)
   if (opts.tier === 'secondary' && cfg.secondaryModel?.trim()) {
     cfg = { ...cfg, model: cfg.secondaryModel.trim() };
   }
   const model = normalizeModel(cfg.provider, cfg.model);
-  if (!model) return { ok: false, message: '尚未設定模型,請到設定挑選' };
+  if (!model) return { ok: false, message: '尚未設定模型，請到設定挑選' };
   if (/\s/.test(model) || (cfg.provider === 'gemini' && /[A-Z]/.test(model))) {
     return {
       ok: false,
-      message: `「${cfg.model}」看起來是顯示名稱,不是 API 模型 id。請到設定按「↻ 取得最新模型」,從下拉選單挑選(正確格式像 gemini-flash-lite-latest)`,
+      message: `「${cfg.model}」看起來是顯示名稱，不是 API 模型 id。請到設定按「↻ 取得最新模型」，從下拉選單挑選(正確格式像 gemini-flash-lite-latest)`,
     };
   }
-  // 暫時性錯誤(429 速率限制、5xx、網路抖動)自動退避重試 2 次;金鑰類錯誤不重試。
+  // 暫時性錯誤(429 速率限制、5xx、網路抖動)自動退避重試 2 次；金鑰類錯誤不重試。
   const RETRYABLE = new Set([429, 500, 502, 503, 529]);
   const MAX_ATTEMPTS = 3;
   let lastMessage = '';
@@ -300,7 +300,7 @@ export async function generateReply(cfg, prompt, opts = {}) {
         try { detail = (await res.json())?.error?.message || ''; } catch { /* noop */ }
         lastMessage = `HTTP ${res.status}${hint ? `(${hint})` : ''}${detail ? `:${detail.slice(0, 120)}` : ''}`;
         if (RETRYABLE.has(res.status) && attempt < MAX_ATTEMPTS - 1) continue;
-        if (RETRYABLE.has(res.status)) lastMessage += '(已自動重試 2 次,請稍後再送一次,你的輸入還在)';
+        if (RETRYABLE.has(res.status)) lastMessage += '(已自動重試 2 次，請稍後再送一次，你的輸入還在)';
         return { ok: false, message: lastMessage };
       }
       const data = await res.json();
@@ -327,7 +327,7 @@ function escapeRegex(s) {
 
 /**
  * 輸出替換規則(設定 → 提示詞):對所有 AI 輸出做「找→換」。
- * 例:把模型愛用的 *動作* 星號體換成(動作)。無效的 regex 會被安全跳過。
+ * 例：把模型愛用的 *動作* 星號體換成(動作)。無效的 regex 會被安全跳過。
  */
 export function applyOutputRules(text) {
   let out = String(text || '');
@@ -337,21 +337,21 @@ export function applyOutputRules(text) {
     try {
       if (r.regex) out = out.replace(new RegExp(r.find, 'g'), r.replace ?? '');
       else out = out.split(r.find).join(r.replace ?? '');
-    } catch { /* 無效規則跳過,不炸輸出 */ }
+    } catch { /* 無效規則跳過，不炸輸出 */ }
   }
   return out;
 }
 
-/** 模型鸚鵡學舌時間戳的清除:剝掉每行開頭的「(7/5(週日) 14:22)」式前綴。
- *  寬容版(v60):模型會吐全形數字/全形冒號/雜字變體,截圖上肉眼相同但字元不同。
- *  策略:行首括號塊、容忍至多 18 個雜字(含內層括號),只要含「時:分」樣式(全半形皆認)
- *  且緊接右括號,就整塊剝除。訊息內文合法出現的「(晚上8:30見)」因時分後有字不會誤剝。 */
+/** 模型鸚鵡學舌時間戳的清除：剝掉每行開頭的「(7/5(週日) 14:22)」式前綴。
+ *  寬容版(v60):模型會吐全形數字/全形冒號/雜字變體，截圖上肉眼相同但字元不同。
+ *  策略：行首括號塊、容忍至多 18 個雜字(含內層括號),只要含「時：分」樣式(全半形皆認)
+ *  且緊接右括號，就整塊剝除。訊息內文合法出現的「(晚上8:30見)」因時分後有字不會誤剝。 */
 const TS_PREFIX = /^\s*[((][^\n]{0,18}?[\d0-9]{1,2}\s*[::][\d0-9]{2}\s*[))]\s*/gm;
 const REL_TIME_ECHO = /\s*[((]約\s?\d+\s?(?:天|個月|年)前[^))]{0,12}[))]/g;
 
-/** 刮掉模型愛加的「名字:」前綴;所有 AI 輸出的統一後處理點(含輸出替換規則)。 */
+/** 刮掉模型愛加的「名字：」前綴；所有 AI 輸出的統一後處理點(含輸出替換規則)。 */
 export function stripNamePrefix(text, names = []) {
-  text = String(text || '').replace(TS_PREFIX, ''); // 先剝時間戳,名字前綴才會回到行首
+  text = String(text || '').replace(TS_PREFIX, ''); // 先剝時間戳，名字前綴才會回到行首
   text = text.replace(REL_TIME_ECHO, ''); // 剝「(約 N 天前)」系統附註的鸚鵡
   let out = String(text || '');
   const list = (Array.isArray(names) ? names : [names])
@@ -363,15 +363,15 @@ export function stripNamePrefix(text, names = []) {
       `^\\s*[*_「『\\[(]*\\s*${escapeRegex(name)}\\s*[」』\\])*_]*\\s*[::]\\s*`,
       'gm',
     );
-    out = out.replace(re, '').replace(re, ''); // 刮兩次,處理「名字:名字:」的怪輸出
+    out = out.replace(re, '').replace(re, ''); // 刮兩次，處理「名字：名字：」的怪輸出
   }
   return applyOutputRules(out).trim();
 }
 
 /**
  * 解析群聊的 JSON 回覆 → [{characterId, content}](最多 3 則)。
- * 模型偶爾會包 markdown 圍欄或講廢話,盡量撈出 JSON;
- * 真的解析不了就把整段當成第一位參與者的單則回覆,不浪費這次呼叫。
+ * 模型偶爾會包 markdown 圍欄或講廢話，盡量撈出 JSON;
+ * 真的解析不了就把整段當成第一位參與者的單則回覆，不浪費這次呼叫。
  */
 export function parseGroupReplies(text, participants, maxReplies = 3) {
   const names = participants.map((c) => c.name);

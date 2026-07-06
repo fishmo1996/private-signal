@@ -2,7 +2,7 @@
  * modules/worldbook.js
  * 世界書(lorebook):多本書 × 多條目。
  * 條目有「觸發關鍵字」與「內容」;buildPrompt 時只把被觸發(或常駐)的條目塞進 prompt,
- * 沒被提到的設定不吃 token。書可設為全域,或只綁定特定角色。
+ * 沒被提到的設定不吃 token。書可設為全域，或只綁定特定角色。
  */
 
 import { getState, genId, persist } from './state.js';
@@ -63,16 +63,17 @@ export function parseKeywords(text) {
     .filter(Boolean);
 }
 
-export async function addEntry(bookId, { title, keywords, content, alwaysOn, priority }) {
+export async function addEntry(bookId, { title, keywords, content, alwaysOn, priority, secondaryKeywords }) {
   const book = getWorldbook(bookId);
   if (!book) return null;
   const entry = {
     id: genId('wbe'),
     title: String(title || '').trim() || '(未命名條目)',
     keywords: Array.isArray(keywords) ? keywords : parseKeywords(keywords),
+    secondaryKeywords: Array.isArray(secondaryKeywords) ? secondaryKeywords : parseKeywords(secondaryKeywords), // v61 selective:空=不設守門
     content: String(content || '').trim(),
-    alwaysOn: !!alwaysOn,   // 常駐:不需關鍵字,永遠進 prompt
-    priority: Number.isFinite(Number(priority)) ? Number(priority) : 100,          // 權重:同時觸發搶位子時,數字大的先進(類似 ST 的 order)
+    alwaysOn: !!alwaysOn,   // 常駐：不需關鍵字，永遠進 prompt
+    priority: Number.isFinite(Number(priority)) ? Number(priority) : 100,          // 權重：同時觸發搶位子時，數字大的先進(類似 ST 的 order)
     enabled: true,
     createdAt: Date.now(),
   };
@@ -88,6 +89,9 @@ export async function updateEntry(bookId, entryId, patch) {
   if (patch.title !== undefined) entry.title = String(patch.title).trim() || entry.title;
   if (patch.keywords !== undefined) {
     entry.keywords = Array.isArray(patch.keywords) ? patch.keywords : parseKeywords(patch.keywords);
+  }
+  if (patch.secondaryKeywords !== undefined) {
+    entry.secondaryKeywords = Array.isArray(patch.secondaryKeywords) ? patch.secondaryKeywords : parseKeywords(patch.secondaryKeywords);
   }
   if (patch.content !== undefined) entry.content = String(patch.content).trim();
   if (patch.alwaysOn !== undefined) entry.alwaysOn = !!patch.alwaysOn;
@@ -108,11 +112,20 @@ export async function deleteEntry(bookId, entryId) {
  * 觸發判定(純函式,buildPrompt 使用):
  * 回傳應進入該角色 prompt 的條目清單。
  * - 只看「啟用中」且(全域 或 綁定了這個角色)的書
- * - 條目需啟用;常駐條目直接進;其餘需關鍵字命中 recentText(不分大小寫)
- * - maxChars 控制總量,避免吃爆 token(常駐優先,再依關鍵字命中順序)
+ * - 條目需啟用；常駐條目直接進；其餘需關鍵字命中 recentText(不分大小寫)
+ * - maxChars 控制總量，避免吃爆 token(常駐優先，再依關鍵字命中順序)
  */
-export function matchEntries({ characterId, roomId = null, recentText, maxChars = 2400 }) {
+export function matchEntries({ characterId, roomId = null, recentText, presentNames = [], maxChars = 2400 }) {
   const text = String(recentText || '').toLowerCase();
+  // v61 selective:條目若填了次要關鍵字，主關鍵字命中後還需「任一次要關鍵字」
+  // 出現在 recentText,或包含於 presentNames(該房在場角色的名字)之中，才算觸發。
+  // 次要關鍵字留空=行為與舊版完全相同；常駐條目不受次要關鍵字限制。
+  const present = (presentNames || []).map((n) => String(n || '').toLowerCase()).filter(Boolean);
+  const secondaryOk = (e) => {
+    const sec = (e.secondaryKeywords || []).map((k) => String(k || '').toLowerCase()).filter(Boolean);
+    if (!sec.length) return true;
+    return sec.some((k) => text.includes(k) || present.some((n) => n.includes(k)));
+  };
   const hits = [];
   for (const book of getWorldbooks()) {
     if (!book.enabled) continue;
@@ -124,12 +137,12 @@ export function matchEntries({ characterId, roomId = null, recentText, maxChars 
       if (!e.enabled || !e.content) continue;
       if (e.alwaysOn) {
         hits.push({ ...e, bookName: book.name, rank: 0 });
-      } else if ((e.keywords || []).some((k) => k && text.includes(String(k).toLowerCase()))) {
+      } else if ((e.keywords || []).some((k) => k && text.includes(String(k).toLowerCase())) && secondaryOk(e)) {
         hits.push({ ...e, bookName: book.name, rank: 1 });
       }
     }
   }
-  // 常駐最優先;其餘依權重(大者先)、再依建立時間
+  // 常駐最優先；其餘依權重(大者先)、再依建立時間
   hits.sort((a, b) => a.rank - b.rank || (b.priority ?? 100) - (a.priority ?? 100) || a.createdAt - b.createdAt);
   const out = [];
   let used = 0;
@@ -143,7 +156,7 @@ export function matchEntries({ characterId, roomId = null, recentText, maxChars 
 }
 
 /* ------------------------------------------------------------
- * 世界書匯出/匯入(不含任何機密;匯入一律建立新書,永不覆蓋)
+ * 世界書匯出/匯入(不含任何機密；匯入一律建立新書，永不覆蓋)
  * ------------------------------------------------------------ */
 
 function bookToExportShape(book) {
@@ -152,11 +165,12 @@ function bookToExportShape(book) {
     enabled: book.enabled,
     scope: {
       global: !!book.scope?.global,
-      // 角色/聊天室 id 在別台裝置沒有意義,匯出時不帶,匯入後重新綁定
+      // 角色/聊天室 id 在別台裝置沒有意義，匯出時不帶，匯入後重新綁定
     },
     entries: book.entries.map((e) => ({
       title: e.title,
       keywords: e.keywords || [],
+      secondaryKeywords: e.secondaryKeywords || [],
       content: e.content,
       alwaysOn: !!e.alwaysOn,
       priority: e.priority ?? 100,
@@ -193,8 +207,8 @@ export function exportAllWorldbooksJson() {
 /**
  * 解析世界書匯入檔。支援:
  * - 本站格式(format: private-signal-worldbook,單本或多本)
- * - SillyTavern / Risu 世界書 JSON(entries 為物件表或陣列,含 key/keys/content/constant/order)
- * 回傳正規化 [{name, enabled, entries[]}];失敗丟人話錯誤,絕不動 state。
+ * - SillyTavern / Risu 世界書 JSON(entries 為物件表或陣列，含 key/keys/content/constant/order)
+ * 回傳正規化 [{name, enabled, entries[]}];失敗丟人話錯誤，絕不動 state。
  */
 export function parseWorldbookImport(jsonText) {
   let parsed;
@@ -236,9 +250,13 @@ function normalizeImportEntry(e, i) {
       : Array.isArray(e.key) ? e.key : [];
   const order = [e.priority, e.insertion_order, e.order]
     .find((v) => Number.isFinite(Number(v)));
+  const secKeys = Array.isArray(e.secondaryKeywords) ? e.secondaryKeywords
+    : Array.isArray(e.keysecondary) ? e.keysecondary
+      : Array.isArray(e.secondary_keys) ? e.secondary_keys : [];
   return {
     title: e.title || e.comment || e.name || `條目 ${i + 1}`,
     keywords: keys.map((k) => String(k).trim()).filter(Boolean),
+    secondaryKeywords: secKeys.map((k) => String(k).trim()).filter(Boolean),
     content: String(e.content || '').trim(),
     alwaysOn: !!(e.alwaysOn ?? e.constant),
     priority: order !== undefined ? Number(order) : 100,
@@ -246,7 +264,7 @@ function normalizeImportEntry(e, i) {
   };
 }
 
-/** 執行匯入:每本都建立為新書(全域、預設啟用依檔案),回傳新書清單。 */
+/** 執行匯入：每本都建立為新書(全域、預設啟用依檔案),回傳新書清單。 */
 export async function importWorldbooks(normalizedBooks) {
   const created = [];
   for (const b of normalizedBooks) {

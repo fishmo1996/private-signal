@@ -1,6 +1,6 @@
 /**
  * modules/voice.js
- * 語音訊息:可插拔的 TTS 供應商架構。
+ * 語音訊息：可插拔的 TTS 供應商架構。
  * 目前內建 browser(Web Speech API,免費、點播才合成、零 token);
  * 之後想升級付費 TTS(男友嗓那種),實作同介面的 provider 掛進 PROVIDERS 即可,
  * UI 與「[語音] 標記」判斷邏輯完全不用動。
@@ -96,7 +96,7 @@ export function stopSpeaking() {
   onStateChange();
 }
 
-/** 從 AI 輸出尾端偵測「[心情:x]」標記:回傳 {content, mood}。 */
+/** 從 AI 輸出尾端偵測「[心情:x]」標記：回傳 {content, mood}。 */
 export function extractMoodTag(text) {
   const t = String(text || '');
   const m = t.match(/\n?\s*(?:\[|【)心情[::]\s*(\S{1,4}?)\s*(?:\]|】)\s*$/);
@@ -104,7 +104,7 @@ export function extractMoodTag(text) {
   return { content: t, mood: null };
 }
 
-/** 提案 M:從輸出尾偵測「[狀態:一句話]」:回傳 {content, status}。>15 字或空=丟棄但仍剝除。 */
+/** 提案 M:從輸出尾偵測「[狀態：一句話]」：回傳 {content, status}。>15 字或空=丟棄但仍剝除。 */
 export function extractStatusTag(text) {
   const t = String(text || '');
   const m = t.match(/\n?\s*(?:\[|【)狀態[::]\s*([^\]】\n]{0,40}?)\s*(?:\]|】)\s*$/);
@@ -114,7 +114,7 @@ export function extractStatusTag(text) {
   return { content: t.slice(0, m.index).trim(), status };
 }
 
-/** 從 AI 輸出偵測「[語音]」標記:回傳 {content, voice}。 */
+/** 從 AI 輸出偵測「[語音]」標記：回傳 {content, voice}。 */
 export function extractVoiceTag(text) {
   const t = String(text || '');
   const m = t.match(/^\s*(?:\[語音\]|【語音】)\s*/);
@@ -122,7 +122,7 @@ export function extractVoiceTag(text) {
   return { content: t, voice: false };
 }
 
-/** 估算語音秒數(顯示用,粗抓每秒 5 字)。 */
+/** 估算語音秒數(顯示用，粗抓每秒 5 字)。 */
 export function estimateSeconds(text) {
   return Math.max(1, Math.round(speechText(text).length / 5));
 }

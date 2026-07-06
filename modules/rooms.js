@@ -10,7 +10,7 @@ import {
 /* ---------------- 角色 ---------------- */
 
 /**
- * 建立角色,並自動建立對應 DM room。
+ * 建立角色，並自動建立對應 DM room。
  * @returns {{character:object, dmRoom:object}}
  */
 export async function createCharacter(data) {
@@ -19,6 +19,7 @@ export async function createCharacter(data) {
   const character = {
     id: genId('char'),
     name: (data.name || '未命名角色').trim(),
+    label: (data.label || '').trim(),      // v61 備註標籤：只顯示給玩家，絕不進任何 prompt(同 persona.label 規矩)
     description: data.description || '',
     personality: data.personality || '',
     scenario: data.scenario || '',
@@ -29,8 +30,8 @@ export async function createCharacter(data) {
     avatarImage: data.avatarImage || null,   // 壓縮後的 dataURL 頭像
     knownPersonaId: data.knownPersonaId || state.defaultPersonaId || null, // 他認識的那個「你」
     proactivity: data.proactivity || 'mid', // 主動程度:off 不主動 | low | mid | high
-    noPhone: !!data.noPhone,               // 非現代世界角色:不發社群/不主動傳訊/不看動態
-    emojiStyle: data.emojiStyle || '',     // emoji 習慣(自由文字,如「只用🐟,像個大叔」)
+    noPhone: !!data.noPhone,               // 非現代世界角色：不發社群/不主動傳訊/不看動態
+    emojiStyle: data.emojiStyle || '',     // emoji 習慣(自由文字，如「只用🐟,像個大叔」)
     relationships: data.relationships || {}, // 與其他角色的關係:{對方id: 描述}(群聊/正文雙方在場時注入)
     themeColor: data.themeColor || '#8ea7ff',
     createdAt: now,
@@ -66,9 +67,9 @@ export async function updateCharacter(id, patch) {
 }
 
 /**
- * 刪除角色,並妥善清理相關資料:
+ * 刪除角色，並妥善清理相關資料:
  * - 刪除其 DM room 與訊息
- * - 從群聊/Story 參與者移除;群聊剩不到 2 名角色、Story 剩 0 名角色時整間刪除
+ * - 從群聊/Story 參與者移除；群聊剩不到 2 名角色、Story 剩 0 名角色時整間刪除
  * - 刪除該角色的私密記憶
  */
 export async function deleteCharacter(id) {
@@ -94,7 +95,7 @@ export async function deleteCharacter(id) {
 
   delete state.memories.byCharacterId[id];
 
-  // 清理社群:該角色的貼文(連同留言)、留言與 seed 記錄
+  // 清理社群：該角色的貼文(連同留言)、留言與 seed 記錄
   if (Array.isArray(state.posts)) {
     const removedPostIds = state.posts.filter((p) => p.authorId === id).map((p) => p.id);
     state.posts = state.posts.filter((p) => p.authorId !== id);
@@ -132,7 +133,7 @@ function deleteRoomInternal(roomId) {
   }
 }
 
-/** 手動刪除一間群聊或 Story(DM 隨角色存在,不單獨刪)。 */
+/** 手動刪除一間群聊或 Story(DM 隨角色存在，不單獨刪)。 */
 export async function deleteRoom(roomId) {
   const room = getRoom(roomId);
   if (!room || room.type === 'dm') return;
@@ -149,7 +150,7 @@ export function findDmRoom(characterId) {
   ) || null;
 }
 
-/** 建立群聊;至少需要 2 個角色。 */
+/** 建立群聊；至少需要 2 個角色。 */
 export async function createGroup(title, characterIds) {
   const state = getState();
   if (!Array.isArray(characterIds) || characterIds.length < 2) {
@@ -170,8 +171,8 @@ export async function createGroup(title, characterIds) {
   return room;
 }
 
-/** 建立 Story 場景;至少需要 1 個角色。 */
-/** 建立旁觀群(peek):角色們自己的群組,玩家不在成員裡、只能偷看。 */
+/** 建立 Story 場景；至少需要 1 個角色。 */
+/** 建立旁觀群(peek):角色們自己的群組，玩家不在成員裡、只能偷看。 */
 export async function createPeek(title, characterIds) {
   const state = getState();
   if (!Array.isArray(characterIds) || characterIds.length < 2) {
@@ -220,8 +221,8 @@ export async function createStory(title, characterIds) {
 
 /**
  * 進入 room 時呼叫。嚴格遵守只插入一次的規則:
- * - DM:messagesByRoom 不存在或長度為 0 時,插入該角色 firstMessage(role: character),之後絕不重複。
- * - Story:未初始化且沒有訊息時,依參與角色的 scenario 建立一則開場敘事,只建立一次。
+ * - DM:messagesByRoom 不存在或長度為 0 時，插入該角色 firstMessage(role: character),之後絕不重複。
+ * - Story:未初始化且沒有訊息時，依參與角色的 scenario 建立一則開場敘事，只建立一次。
  * - Group:未初始化時插入一句原創的簡短系統歡迎語。
  */
 export async function ensureRoomInitialized(roomId) {
@@ -299,7 +300,7 @@ function buildStoryOpening(room, chars) {
       return `${c.name}——${frag}`;
     })
     .join(';');
-  return `〔${room.title}〕\n燈光還沒完全亮起。${pieces}。\n${playerName}站在場景的邊緣,下一句話會決定這裡如何開始。`;
+  return `〔${room.title}〕\n燈光還沒完全亮起。${pieces}。\n${playerName}站在場景的邊緣，下一句話會決定這裡如何開始。`;
 }
 
 function firstClause(text, max) {
@@ -358,7 +359,7 @@ export async function removeRoomMember(roomId, characterId) {
 
 /* ------------------------------------------------------------
  * 提案 H:時間線分岔(零 API)。
- * 把房間複製到某則訊息(含)的時間點成為新房:開車線與日常線分家、
+ * 把房間複製到某則訊息(含)的時間點成為新房：開車線與日常線分家、
  * 重大選擇兩邊都看、捨不得覆蓋的重骰。
  * ------------------------------------------------------------ */
 

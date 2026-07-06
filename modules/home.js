@@ -1,7 +1,7 @@
 /**
  * modules/home.js
  * 鎖定畫面與主畫面的內容產生器。
- * 這裡只產生 HTML 字串與時間文字;事件綁定交給 ui.js,避免模組互相依賴。
+ * 這裡只產生 HTML 字串與時間文字；事件綁定交給 ui.js,避免模組互相依賴。
  */
 
 import { getState, getConfig, getCharacter } from './state.js';
@@ -27,7 +27,7 @@ function firstLine(text, max) {
   return t.length > max ? t.slice(0, max) + '…' : t;
 }
 
-/** 主畫面 App 圖示定義(原創幾何字符 + CSS 色塊,不使用真實平台圖示)。 */
+/** 主畫面 App 圖示定義(原創幾何字符 + CSS 色塊，不使用真實平台圖示)。 */
 export const HOME_APPS = [
   { id: 'story',    label: '正文',   view: 'story-list', glyph: '❖', tone: 'c' },
   { id: 'album',    label: '相簿',   view: 'album',      glyph: '✧', tone: 'b' },

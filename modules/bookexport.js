@@ -1,13 +1,13 @@
 /**
  * modules/bookexport.js — 提案 B:正文匯出成書。
  * 把已封存章節+目前章節匯出為單一自包含 HTML(離線可讀、書頁版式、目錄跳章)。
- * 全程零 API 呼叫:純本地複製+轉義+拼裝,不經模型、無任何內容過濾。
+ * 全程零 API 呼叫：純本地複製+轉義+拼裝，不經模型、無任何內容過濾。
  * 內容規則(擁有者拍板):只收 narrator 與 character;user(玩家輸入)與 system 不進書。
  */
 
 import { getState, getCharacter } from './state.js';
 
-/** esc() 等價轉義:書檔同為 innerHTML 語意,XSS 防線不可繞過。 */
+/** esc() 等價轉義：書檔同為 innerHTML 語意,XSS 防線不可繞過。 */
 function escB(str) {
   return String(str ?? '')
     .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')

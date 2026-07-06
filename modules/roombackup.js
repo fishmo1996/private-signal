@@ -3,15 +3,15 @@
  * 個別聊天室的備份與還原(單一故事線的可攜檔案)。
  *
  * 隱私隔離規則(鐵律):
- * - DM 匯出:只帶「這位角色」的私密記憶;其他角色的任何私密資料絕不進檔。
- * - 群聊/正文匯出:完全不帶任何私密記憶(群體空間本來就只有公開資訊)。
- * - 共享記憶一律不帶(屬於圈子/全域層級,走全域備份)。
- * - API 金鑰、其他聊天室的訊息,永不進檔。
+ * - DM 匯出：只帶「這位角色」的私密記憶；其他角色的任何私密資料絕不進檔。
+ * - 群聊/正文匯出：完全不帶任何私密記憶(群體空間本來就只有公開資訊)。
+ * - 共享記憶一律不帶(屬於圈子/全域層級，走全域備份)。
+ * - API 金鑰、其他聊天室的訊息，永不進檔。
  *
- * 匯入規則:一律「建立新聊天室副本」,永不覆蓋既有資料;
+ * 匯入規則：一律「建立新聊天室副本」，永不覆蓋既有資料;
  * 參與角色依名字比對——群聊/正文可沿用同名角色,DM 若同名角色已存在
  * 則建立「名字(匯入)」的新角色以避免一角色多 DM 的歧義。
- * 驗證失敗以人話報錯,且不動任何 state。
+ * 驗證失敗以人話報錯，且不動任何 state。
  */
 
 import {
@@ -19,7 +19,7 @@ import {
 } from './state.js';
 import { createCharacter, createGroup, createStory } from './rooms.js';
 
-/** 角色的可攜快照(僅公開欄位;無 id、無人設綁定)。 */
+/** 角色的可攜快照(僅公開欄位；無 id、無人設綁定)。 */
 function charSnapshot(c) {
   return {
     name: c.name,
@@ -61,7 +61,7 @@ export function exportRoomJson(roomId) {
     createdAt: m.createdAt,
   }));
 
-  // 記憶:場景記憶一律帶;私密記憶只有 DM 且只帶「這位角色」的
+  // 記憶：場景記憶一律帶；私密記憶只有 DM 且只帶「這位角色」的
   const roomMemories = (state.memories.byRoomId[roomId] || [])
     .map((m) => ({ content: m.content, pinned: !!m.pinned, createdAt: m.createdAt }));
   let privateMemories = [];
@@ -90,7 +90,7 @@ export function exportRoomJson(roomId) {
   }, null, 2);
 }
 
-/** 解析並驗證,失敗丟人話錯誤;絕不動 state。 */
+/** 解析並驗證，失敗丟人話錯誤；絕不動 state。 */
 export function parseRoomImport(jsonText) {
   let parsed;
   try {
@@ -114,14 +114,14 @@ export function parseRoomImport(jsonText) {
 }
 
 /**
- * 匯入:建立新聊天室副本。回傳 { room, createdCharacters }。
+ * 匯入：建立新聊天室副本。回傳 { room, createdCharacters }。
  */
 export async function importRoom(parsed) {
   const state = getState();
   const nameToId = new Map();
   const createdCharacters = [];
 
-  // 角色:群聊/正文沿用同名;DM 同名時建「(匯入)」新角色避免一角多 DM
+  // 角色：群聊/正文沿用同名;DM 同名時建「(匯入)」新角色避免一角多 DM
   for (const snap of parsed.participants) {
     const existing = state.characters.find((c) => c.name === snap.name);
     if (existing && parsed.room.type !== 'dm') {
@@ -161,7 +161,7 @@ export async function importRoom(parsed) {
     room.archivedChapters = parsed.room.archivedChapters;
   }
 
-  // 訊息:整批覆蓋新房(DM 會蓋掉自動插入的開場白,忠實還原備份)
+  // 訊息：整批覆蓋新房(DM 會蓋掉自動插入的開場白，忠實還原備份)
   state.messagesByRoom[room.id] = parsed.messages.map((m) => ({
     id: genId('msg'),
     role: m.role || 'user',

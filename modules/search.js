@@ -1,6 +1,6 @@
 /**
  * modules/search.js
- * 全域搜尋:訊息 / 記憶 / 貼文 / 日記,全部本機比對,零 API 消耗。
+ * 全域搜尋：訊息 / 記憶 / 貼文 / 日記，全部本機比對，零 API 消耗。
  */
 
 import { getState, getCharacter } from './state.js';

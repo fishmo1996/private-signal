@@ -1,8 +1,8 @@
 /**
  * modules/persona.js
- * 多人設(persona):你可以有多個「你」,每個角色認識其中一個。
+ * 多人設(persona):你可以有多個「你」，每個角色認識其中一個。
  * - 每個角色有 knownPersonaId:他認識的那個你
- * - 每個對話(room)有 personaId:這個對話裡你是誰(建立時自動帶入,可手動換)
+ * - 每個對話(room)有 personaId:這個對話裡你是誰(建立時自動帶入，可手動換)
  * - 貼文/留言記錄 personaId:用哪個身分發的
  * - 「圈子」= 同一個 personaId:社群互動只由認識該人設的角色出面(方案一)
  */
@@ -30,7 +30,7 @@ export function personaForRoom(room) {
   return (room && getPersona(room.personaId)) || defaultPersona();
 }
 
-/** 這篇貼文屬於哪個圈子(personaId)。玩家貼文=發文人設;角色貼文=作者認識的人設。 */
+/** 這篇貼文屬於哪個圈子(personaId)。玩家貼文=發文人設；角色貼文=作者認識的人設。 */
 export function circleOfPost(post, getCharacter) {
   if (!post) return null;
   if (post.authorId === 'player') return post.personaId || getState().defaultPersonaId;
@@ -76,8 +76,8 @@ export async function updatePersona(id, patch) {
 }
 
 /**
- * 刪除人設:最後一個不可刪;
- * 指到它的角色/對話/貼文/留言全部改指預設人設,不刪任何內容。
+ * 刪除人設：最後一個不可刪;
+ * 指到它的角色/對話/貼文/留言全部改指預設人設，不刪任何內容。
  */
 export async function deletePersona(id) {
   const state = getState();

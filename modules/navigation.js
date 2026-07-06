@@ -1,12 +1,12 @@
 /**
  * modules/navigation.js
- * 手機的頁面導覽:目前頁面、返回行為與鎖定畫面。
+ * 手機的頁面導覽：目前頁面、返回行為與鎖定畫面。
  *
  * 頁面(phoneView)一覽:
  *   home             主畫面(App 圖示網格)
  *   chat-friends     聊天 App:好友分頁(DM 列表)
  *   chat-rooms       聊天 App:聊天室分頁(群聊列表)
- *   chat-room        聊天 App:對話詳情(DM 或群聊,依 currentRoomId)
+ *   chat-room        聊天 App:對話詳情(DM 或群聊，依 currentRoomId)
  *   social-feed      社群 App:貼文列表
  *   social-post      社群 App:貼文詳情(依 currentPostId)
  *   story-list       正文 App:場景列表
@@ -16,14 +16,14 @@
  *   settings         設定 App
  *
  * 鎖定畫面(lock)不寫入 state.phoneView:
- * 它只是每次「啟動」的沉浸感入口,解鎖與否僅存在於本次瀏覽階段。
+ * 它只是每次「啟動」的沉浸感入口，解鎖與否僅存在於本次瀏覽階段。
  */
 
 import { getState, persist, getRoom } from './state.js';
 
 let locked = false; // 本次瀏覽階段是否停在鎖屏
 
-/** 啟動時呼叫:依設定決定是否先顯示鎖屏。 */
+/** 啟動時呼叫：依設定決定是否先顯示鎖屏。 */
 export function initNavigation() {
   const state = getState();
   locked = state.settings.showLockScreen !== false;
@@ -57,7 +57,7 @@ export async function navigate(view, params = {}) {
   if ('postId' in params) state.currentPostId = params.postId ?? null;
   if ('characterId' in params) state.currentCharacterId = params.characterId ?? null;
   if ('worldbookId' in params) state.currentWorldbookId = params.worldbookId ?? null;
-  // 離開對話/貼文頁時清掉對應指標,避免殘留
+  // 離開對話/貼文頁時清掉對應指標，避免殘留
   if (view !== 'chat-room' && view !== 'story-room') state.currentRoomId = null;
   if (view !== 'social-post') state.currentPostId = null;
   await persist();

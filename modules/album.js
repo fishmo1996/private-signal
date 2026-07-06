@@ -1,6 +1,6 @@
 /**
  * modules/album.js
- * 回憶相簿:照片本體只存在本機、只在你主動分享時才送給模型看;
+ * 回憶相簿：照片本體只存在本機、只在你主動分享時才送給模型看;
  * 平常進 prompt 的是每張照片的一行「回憶描述」(超省 token)。
  */
 
@@ -47,7 +47,7 @@ export async function deletePhoto(id) {
 }
 
 /**
- * 某角色「共同的回憶」文字(他有被標註在場的照片;最近 6 張)。
+ * 某角色「共同的回憶」文字(他有被標註在場的照片；最近 6 張)。
  * 沒有任何回憶時回傳 ''。
  */
 export function albumTextFor(characterId, limit = 6) {
@@ -60,7 +60,7 @@ export function albumTextFor(characterId, limit = 6) {
 
 /**
  * 紀念日偵測:dateText 含「YYYY/M/D」或「M/D」且月日=今天 → 回傳提示句。
- * 給某角色的 DM prompt 用;沒有就 ''。
+ * 給某角色的 DM prompt 用；沒有就 ''。
  */
 export function anniversaryTextFor(characterId) {
   const today = new Date();

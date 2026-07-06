@@ -1,7 +1,7 @@
 /**
  * modules/memory.js
  * 記憶管理。第一版沒有真實 AI,不假裝做語意摘要:
- * 「記憶候選」以訊息原文截取產生,並讓使用者在儲存前手動編輯。
+ * 「記憶候選」以訊息原文截取產生，並讓使用者在儲存前手動編輯。
  */
 
 import { getState, genId, persist, getRoom } from './state.js';
@@ -32,7 +32,7 @@ export function createMemoryCandidate(message, roomId) {
   const raw = message.content.trim().replace(/\s+/g, ' ');
   let content = raw.length > CANDIDATE_MAX_LEN ? raw.slice(0, CANDIDATE_MAX_LEN) + '…' : raw;
 
-  // 共享記憶預設綁「當前對話的圈子」;玩家發言標註人設名
+  // 共享記憶預設綁「當前對話的圈子」；玩家發言標註人設名
   let circleId = null;
   if (visibility === 'shared') {
     const persona = personaForRoom(room);
@@ -41,10 +41,10 @@ export function createMemoryCandidate(message, roomId) {
   }
 
   return {
-    content,          // 訊息原文截取;使用者可在儲存前編輯
+    content,          // 訊息原文截取；使用者可在儲存前編輯
     visibility,       // shared | private | room
     characterId,      // visibility 為 private 時使用
-    circleId,         // shared 時:綁定的圈子(personaId);null = 全域
+    circleId,         // shared 時：綁定的圈子(personaId);null = 全域
     sourceRoomId: roomId,
   };
 }
@@ -142,7 +142,7 @@ export function sharedMemoriesFor(circleId) {
 }
 
 /* ------------------------------------------------------------
- * 對話摘要:把「上次摘要點之後」的訊息濃縮成記憶候選(手動觸發)
+ * 對話摘要：把「上次摘要點之後」的訊息濃縮成記憶候選(手動觸發)
  * ------------------------------------------------------------ */
 
 /** 上次摘要點之後的新訊息(最多 60 則)。 */
@@ -170,7 +170,7 @@ export function buildSummaryPrompt(roomId) {
   const system = [
     '你是記憶整理助手。把以下對話濃縮成 3~6 條「值得長期記住」的記憶條目。',
     '每條 15~50 字、繁體中文、第三人稱、只記事實與約定(誰、做了什麼、約好什麼、關係變化),不要心情形容詞堆砌。',
-    '只輸出 JSON 字串陣列,例如 ["兩人打賭游泳,輸的請飲料","子勳的生日是門鎖密碼"],不要其他文字。',
+    '只輸出 JSON 字串陣列，例如 ["兩人打賭游泳，輸的請飲料","子勳的生日是門鎖密碼"],不要其他文字。',
   ].join('\n');
 
   return {
@@ -182,7 +182,7 @@ export function buildSummaryPrompt(roomId) {
 
 /**
  * 產生摘要候選。真實 AI:單次呼叫;mock:抽最長的幾則截取。
- * 只回傳候選,不寫入任何記憶(由使用者勾選後存)。
+ * 只回傳候選，不寫入任何記憶(由使用者勾選後存)。
  */
 export async function generateSummaryCandidates(roomId) {
   const msgs = messagesSinceSummary(roomId);
@@ -208,10 +208,10 @@ export async function generateSummaryCandidates(roomId) {
   if (!items) {
     items = r.text.split('\n').map((l) => l.replace(/^[-•\d.、\s]+/, '').trim()).filter((l) => l.length > 4).slice(0, 6);
   }
-  return items.length ? { ok: true, items } : { ok: false, message: '模型沒有產出可用的條目,再試一次' };
+  return items.length ? { ok: true, items } : { ok: false, message: '模型沒有產出可用的條目，再試一次' };
 }
 
-/** 存入勾選的摘要條目後,推進摘要進度點(下次只摘新增部分)。 */
+/** 存入勾選的摘要條目後，推進摘要進度點(下次只摘新增部分)。 */
 export async function commitSummary(roomId, savedCount) {
   const room = getRoom(roomId);
   const msgs = messagesSinceSummary(roomId);
@@ -221,7 +221,7 @@ export async function commitSummary(roomId, savedCount) {
 }
 
 /* ------------------------------------------------------------
- * 正文章節封存:摘要整章 → 存進場景記憶 → 清空對話重新開始。
+ * 正文章節封存：摘要整章 → 存進場景記憶 → 清空對話重新開始。
  * 舊章完整訊息存進 room.archivedChapters,可回翻、隨備份攜帶。
  * ------------------------------------------------------------ */
 
@@ -250,7 +250,7 @@ export async function archiveChapter(roomId, { title = '' } = {}) {
     createdAt: Date.now(),
   });
 
-  // 3) 整章原文封存,清空當前對話
+  // 3) 整章原文封存，清空當前對話
   if (!Array.isArray(room.archivedChapters)) room.archivedChapters = [];
   room.archivedChapters.push({
     n,
@@ -267,7 +267,7 @@ export async function archiveChapter(roomId, { title = '' } = {}) {
 }
 
 /* ------------------------------------------------------------
- * 提案 C:紀念日自動感知(全本地日期運算,零額外 API)。
+ * 提案 C:紀念日自動感知(全本地日期運算，零額外 API)。
  * eventDate 預設由 createdAt 導出;annualDate 為生日類年年觸發。
  * ------------------------------------------------------------ */
 
@@ -291,9 +291,9 @@ export function relativeTimeNote(memory, now = Date.now()) {
 }
 
 /**
- * 紀念日偵測:回傳 null 或 { type:'monthly'|'yearly'|'annual', n }。
+ * 紀念日偵測：回傳 null 或 { type:'monthly'|'yearly'|'annual', n }。
  * monthly=事件日同「日」且至少滿 1 個月;yearly=同月同日且至少滿 1 年(yearly 優先於 monthly);
- * annual=annualDate(MM-DD)命中今天,n=0(年年觸發,不算年數)。
+ * annual=annualDate(MM-DD)命中今天,n=0(年年觸發，不算年數)。
  */
 export function anniversaryInfo(memory, now = Date.now()) {
   const today = new Date(now);
@@ -326,7 +326,7 @@ export function anniversaryMemoryHits(characterId, roomId = null, now = Date.now
     const info = anniversaryInfo(m, now);
     if (info) hits.push({ memory: m, ...info });
   }
-  return hits.slice(0, 2); // 一天最多兩個,避免轟炸
+  return hits.slice(0, 2); // 一天最多兩個，避免轟炸
 }
 
 function getCharacterById(id) {

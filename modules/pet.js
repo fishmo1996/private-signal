@@ -1,6 +1,6 @@
 /**
  * modules/pet.js — 提案 L:桌面寵物。零 API 純前端。
- * 只住主畫面底部:隨機走走停停、偶爾坐下/趴睡;點擊冒罐頭台詞泡泡。
+ * 只住主畫面底部：隨機走走停停、偶爾坐下/趴睡；點擊冒罐頭台詞泡泡。
  * 計時器在 unmount 時清乾淨(參考 clockTimer 模式);
  * prefers-reduced-motion 時改靜態坐姿;jsdom 環境包 try/catch 不炸。
  */
@@ -12,8 +12,8 @@ let bubbleTimer = null;
 let petEl = null;
 
 const DEFAULT_LINES = [
-  '汪!',
-  '汪汪!',
+  '汪！',
+  '汪汪！',
   '(搖尾巴)',
   '(歪頭)',
   '(把肚子翻給你)',
@@ -21,7 +21,7 @@ const DEFAULT_LINES = [
   '汪?(看向門口)',
   '(打了個大呵欠)',
   '(繞著你轉圈圈)',
-  '(趴下,下巴貼地看著你)',
+  '(趴下，下巴貼地看著你)',
 ];
 
 /** 內建簡筆狗 SVG(未上傳圖時的預設豬皮)。 */
@@ -80,7 +80,7 @@ function wander(container) {
   if (!petEl || !container) return;
   const roll = Math.random();
   if (roll < 0.45) {
-    // 走:挑個新位置,方向翻面
+    // 走：挑個新位置，方向翻面
     const max = Math.max(40, (container.clientWidth || 320) - 70);
     const x = 10 + Math.random() * (max - 10);
     const cur = parseFloat(petEl.style.left) || 20;
@@ -94,7 +94,7 @@ function wander(container) {
   }
 }
 
-/** 掛上寵物(只在主畫面呼叫)。jsdom 安全:全程 try/catch。 */
+/** 掛上寵物(只在主畫面呼叫)。jsdom 安全：全程 try/catch。 */
 export function mountPet(container) {
   try {
     unmountPet();
@@ -120,7 +120,7 @@ export function mountPet(container) {
   } catch { /* 任何環境問題都不影響主畫面 */ }
 }
 
-/** 卸下寵物與計時器(離開主畫面時必呼叫,參考 clockTimer 清理模式)。 */
+/** 卸下寵物與計時器(離開主畫面時必呼叫，參考 clockTimer 清理模式)。 */
 export function unmountPet() {
   if (petTimer) { clearInterval(petTimer); petTimer = null; }
   if (bubbleTimer) { clearTimeout(bubbleTimer); bubbleTimer = null; }

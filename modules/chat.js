@@ -2,7 +2,7 @@
  * modules/chat.js
  * 訊息傳送與第一版的本機假回覆(mock)。
  * 不呼叫任何 API。所有假回覆都會先經過 buildPrompt,
- * 取用角色設定、玩家設定與可見記憶,讓未來換成真實 AI 時資料流一致。
+ * 取用角色設定、玩家設定與可見記憶，讓未來換成真實 AI 時資料流一致。
  */
 
 import { getCharacter,
@@ -76,8 +76,8 @@ function appendMessage(roomId, { role, senderId, content, image = null, sharedPo
     ...(image ? { image } : {}),
     ...(sharedPost ? { sharedPost } : {}),   // {postId, authorName, excerpt, image}:引用的貼文卡
     ...(choices && choices.length ? { choices } : {}), // 正文行動選項(僅最後一則顯示)
-    ...(voice ? { voice: true } : {}),                 // 語音訊息(以聲波樣式呈現,點播用 TTS 唸)
-    ...(missedCall ? { missedCall: true } : {}),       // 未接來電留言(提案 D):程式端設定,不靠模型標記
+    ...(voice ? { voice: true } : {}),                 // 語音訊息(以聲波樣式呈現，點播用 TTS 唸)
+    ...(missedCall ? { missedCall: true } : {}),       // 未接來電留言(提案 D):程式端設定，不靠模型標記
     createdAt: Date.now(),
   };
   msgs.push(msg);
@@ -87,7 +87,7 @@ function appendMessage(roomId, { role, senderId, content, image = null, sharedPo
 /* ---------------- Mock 回覆:DM ---------------- */
 
 /**
- * 依角色設定與使用者最後一句,產生 1~2 則短私訊。
+ * 依角色設定與使用者最後一句，產生 1~2 則短私訊。
  * 選擇邏輯可重現(以訊息內容、訊息數與角色 id 做 seed),但不完全死板。
  */
 export function generateMockDmReply({ character, userText, prompt, msgCount }) {
@@ -99,36 +99,36 @@ export function generateMockDmReply({ character, userText, prompt, msgCount }) {
   const player = getState().player.playerName || '你';
 
   const mains = [
-    `「${echo}」……我剛剛把這句話讀了兩遍。跟我多說一點?`,
-    `${player},你說${echo}的時候,是認真的,還是想看我的反應?`,
-    `${echo}。嗯,收到了。我這邊${scene ? scene : '沒什麼特別的事'},所以你講的每件事我都有在聽。`,
+    `「${echo}」……我剛剛把這句話讀了兩遍。跟我多說一點？`,
+    `${player},你說${echo}的時候，是認真的，還是想看我的反應？`,
+    `${echo}。嗯，收到了。我這邊${scene ? scene : '沒什麼特別的事'},所以你講的每件事我都有在聽。`,
     `等等——${echo}?這件事你之前完全沒提過。`,
-    `我在想怎麼回你比較好。${echo}這種話,不太適合隨便回。`,
-    `${echo}啊……${trait ? `像我這種${trait}的人,` : ''}大概只會先說:先別急,慢慢講。`,
+    `我在想怎麼回你比較好。${echo}這種話，不太適合隨便回。`,
+    `${echo}啊……${trait ? `像我這種${trait}的人,` : ''}大概只會先說：先別急，慢慢講。`,
   ];
 
   const flavors = [
-    trait ? `說真的,${trait}也是會累的。` : `說真的,今天有點安靜。`,
-    memHint ? `對了,我還記得「${memHint}」這件事。沒忘。` : `對了,別讓我一個人猜太久。`,
-    scene ? `這邊${scene},等你有空再跟你細講。` : `等你回我,我再繼續說。`,
+    trait ? `說真的,${trait}也是會累的。` : `說真的，今天有點安靜。`,
+    memHint ? `對了，我還記得「${memHint}」這件事。沒忘。` : `對了，別讓我一個人猜太久。`,
+    scene ? `這邊${scene},等你有空再跟你細講。` : `等你回我，我再繼續說。`,
     character.avatarEmoji ? `${character.avatarEmoji}` : `……就這樣。`,
   ];
 
   const replies = [pick(mains, seed)];
-  // 訊息數為偶數、或使用者訊息偏長時,補一則短句,製造私訊節奏。
+  // 訊息數為偶數、或使用者訊息偏長時，補一則短句，製造私訊節奏。
   if (msgCount % 2 === 0 || userText.length > 24) {
     replies.push(pick(flavors, seed >> 3));
   }
   return replies;
 }
 
-/* ---------------- Mock 回覆:群聊 ---------------- */
+/* ---------------- Mock 回覆：群聊 ---------------- */
 
 /**
  * 產生一個「自然訊息包」:
  * - 一位主要回覆者
  * - 0~2 位補充/吐槽/貼圖文字/延後訊息
- * - 每回合最多三則,不強迫人人回覆,角色間偶爾互相接話。
+ * - 每回合最多三則，不強迫人人回覆，角色間偶爾互相接話。
  */
 export function generateMockGroupReplies({ room, userText, msgCount }) {
   const chars = getRoomCharacters(room);
@@ -142,11 +142,11 @@ export function generateMockGroupReplies({ room, userText, msgCount }) {
   const mainTrait = traitOf(main);
 
   const mainLines = [
-    `${echo}?我先回好了,免得又冷場。`,
-    `這題我接。${echo}的話,我的答案很簡單:看情況。`,
-    `${memHint ? `等等,這跟之前「${memHint}」那件事有關吧?` : `${echo}……讓我想三秒。好,想完了,我有意見。`}`,
+    `${echo}?我先回好了，免得又冷場。`,
+    `這題我接。${echo}的話，我的答案很簡單：看情況。`,
+    `${memHint ? `等等，這跟之前「${memHint}」那件事有關吧？` : `${echo}……讓我想三秒。好，想完了，我有意見。`}`,
     `${mainTrait ? `以一個${mainTrait}的人的立場,` : ''}我覺得${echo}這件事值得認真聊。`,
-    `你直接在群裡丟「${echo}」,是想看我們吵起來嗎?`,
+    `你直接在群裡丟「${echo}」，是想看我們吵起來嗎？`,
   ];
 
   const replies = [{
@@ -155,7 +155,7 @@ export function generateMockGroupReplies({ room, userText, msgCount }) {
     delay: 700 + (seed % 400),
   }];
 
-  // 0~2 位補充者;短訊息、有時只有 emoji、有時接主要回覆者的話。
+  // 0~2 位補充者；短訊息、有時只有 emoji、有時接主要回覆者的話。
   const others = chars.filter((c) => c.id !== main.id);
   const extraCount = Math.min(others.length, [0, 1, 1, 2][(seed >> 2) % 4]);
 
@@ -165,10 +165,10 @@ export function generateMockGroupReplies({ room, userText, msgCount }) {
     const extraLines = [
       `${main.name}講得比我想說的還快。`,
       `${c.avatarEmoji || '…'}`,
-      `我先記下來,等下私下回你。開玩笑的,這裡大家都看得到。`,
-      `+1。不過「${echo}」這部分,我保留意見。`,
+      `我先記下來，等下私下回你。開玩笑的，這裡大家都看得到。`,
+      `+1。不過「${echo}」這部分，我保留意見。`,
       `笑死,${main.name}你回得也太認真。`,
-      `路過,表示看到了。`,
+      `路過，表示看到了。`,
     ];
     replies.push({
       characterId: c.id,
@@ -196,17 +196,17 @@ export function generateMockStoryReply({ room, userText, msgCount }) {
   const memHint = prompt ? memoryHintOf(prompt, seed) : '';
 
   const narrations = [
-    `${player}的話落在空氣裡,像一顆石子沉進水面。${scene ? `${scene}的氣息還沒散去,` : ''}沒有人急著打破這片刻的靜。`,
-    `一陣短暫的停頓。${speaker ? `${speaker.name}的手指停了一下,` : ''}光線在牆上緩慢移動,把「${echo}」這句話拉得很長。`,
-    `場景微微傾斜了一度——不是真的傾斜,只是氣氛變了。${player}能感覺到,有什麼被這句話推動了。`,
+    `${player}的話落在空氣裡，像一顆石子沉進水面。${scene ? `${scene}的氣息還沒散去,` : ''}沒有人急著打破這片刻的靜。`,
+    `一陣短暫的停頓。${speaker ? `${speaker.name}的手指停了一下,` : ''}光線在牆上緩慢移動，把「${echo}」這句話拉得很長。`,
+    `場景微微傾斜了一度——不是真的傾斜，只是氣氛變了。${player}能感覺到，有什麼被這句話推動了。`,
   ];
 
   const dialogues = speaker ? [
-    `「${echo}……」${speaker.name}緩緩開口,聲音壓得很低,「你確定要在這個時候說這種話?」`,
-    `${speaker.name}看向${player},沉默了幾秒,才說:「好。那我們就照你說的走。但別回頭。」`,
-    `「${memHint ? `我一直記得${memHint}。` : '我不會假裝沒聽見。'}」${speaker.name}向前一步,「所以,${echo}——說清楚一點。」`,
+    `「${echo}……」${speaker.name}緩緩開口，聲音壓得很低，「你確定要在這個時候說這種話？」`,
+    `${speaker.name}看向${player},沉默了幾秒，才說：「好。那我們就照你說的走。但別回頭。」`,
+    `「${memHint ? `我一直記得${memHint}。` : '我不會假裝沒聽見。'}」${speaker.name}向前一步，「所以,${echo}——說清楚一點。」`,
   ] : [
-    `(這個場景目前沒有角色。到左側新增角色,或建立新的場景。)`,
+    `(這個場景目前沒有角色。到左側新增角色，或建立新的場景。)`,
   ];
 
   return {
@@ -233,7 +233,7 @@ export function isRoomBusy(roomId) {
 export async function sendUserMessage(roomId, text, notify, image = null, sharedPost = null) {
   const room = getRoom(roomId);
   if (!room || (!text.trim() && !image && !sharedPost) || busyRoomIds.has(roomId)) return;
-  if (room.type === 'peek') return; // 旁觀群:你不在裡面,說不了話(UI 已藏輸入框,這裡是底層防呆)
+  if (room.type === 'peek') return; // 旁觀群：你不在裡面，說不了話(UI 已藏輸入框，這裡是底層防呆)
 
   busyRoomIds.add(roomId);
   try {
@@ -251,12 +251,12 @@ export async function sendUserMessage(roomId, text, notify, image = null, shared
   }
 }
 
-/** 每個 room 的重新生成次數(僅存在本次瀏覽階段,用來變化 mock 的隨機種子)。 */
+/** 每個 room 的重新生成次數(僅存在本次瀏覽階段，用來變化 mock 的隨機種子)。 */
 const regenCount = new Map();
 
 /**
- * 重新生成:刪掉最後一個玩家訊息之後的所有 AI 回覆,用同樣的上下文重打一次。
- * 不保留舊版本(接受制:滿意就留,不滿意就 roll 掉)。
+ * 重新生成：刪掉最後一個玩家訊息之後的所有 AI 回覆，用同樣的上下文重打一次。
+ * 不保留舊版本(接受制：滿意就留，不滿意就 roll 掉)。
  */
 export async function regenerateLastReply(roomId, notify) {
   const state = getState();
@@ -332,7 +332,7 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
           appendMessage(roomId, {
             role: 'system',
             senderId: 'system',
-            content: `AI 回覆失敗:${r.message}。你的訊息已保留;可稍後重試,或到設定關閉「使用真實 AI」改用本機假回覆。`,
+            content: `AI 回覆失敗:${r.message}。你的訊息已保留；可稍後重試，或到設定關閉「使用真實 AI」改用本機假回覆。`,
           });
         }
         await persist();
@@ -351,16 +351,16 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
     } else if (room.type === 'group') {
       const cfgG = getApiConfig();
       const participants = getRoomCharacters(room);
-      // @點名:訊息含「@角色名」時,該角色必回
+      // @點名：訊息含「@角色名」時，該角色必回
       const mentioned = participants.find((c) => text.includes(`@${c.name}`)) || null;
       if (cfgG.useRealApi && cfgG.apiKey && cfgG.model) {
-        // 一次 API 呼叫產生整包多角色訊息(而非每角色各打一次,省成本)
+        // 一次 API 呼叫產生整包多角色訊息(而非每角色各打一次，省成本)
         notify({ typingBy: (mentioned || participants[0])?.name || '' });
         const r = await generateReply(cfgG, buildGroupPrompt({ roomId, mentionName: mentioned?.name || null }));
         if (r.ok) {
           const pack = parseGroupReplies(r.text, participants);
           if (!pack.length) {
-            appendMessage(roomId, { role: 'system', senderId: 'system', content: 'AI 回覆了無法解析的內容,請再試一次。你的訊息已保留。' });
+            appendMessage(roomId, { role: 'system', senderId: 'system', content: 'AI 回覆了無法解析的內容，請再試一次。你的訊息已保留。' });
             await persist(); notify({});
             return;
           }
@@ -459,7 +459,7 @@ export async function deleteMessage(roomId, messageId) {
 }
 
 /* ------------------------------------------------------------
- * 群聊自燃:角色們自己聊起來(↻ 觸發,與其他刷新共用節流哲學)
+ * 群聊自燃：角色們自己聊起來(↻ 觸發，與其他刷新共用節流哲學)
  * ------------------------------------------------------------ */
 
 export function selfChatCooldownLeft() {
@@ -481,7 +481,7 @@ export async function selfChat(roomId, notify, opts = {}) {
   }
   const isEmptyRoom = (getRoomMessages(roomId) || []).length === 0;
   if (!opts.force && !isEmptyRoom) {
-    // 空房第一把免冷卻;冷卻只在「成功」後才開始計(失敗不燒額度)
+    // 空房第一把免冷卻；冷卻只在「成功」後才開始計(失敗不燒額度)
     const left = selfChatCooldownLeft();
     if (left > 0) return { ok: false, message: `再等 ${Math.ceil(left / 60)} 分鐘可以再刷新` };
   }
@@ -498,21 +498,21 @@ export async function selfChat(roomId, notify, opts = {}) {
         prompt = buildGroupPrompt({ roomId, selfTalk: true });
         prompt.messages = [
           ...prompt.messages,
-          { role: 'user', content: '(群組安靜了一陣子,你們之中有人先開口。)' },
+          { role: 'user', content: '(群組安靜了一陣子，你們之中有人先開口。)' },
         ];
       }
       notify({ typingBy: participants[0]?.name || '' });
       const r = await generateReply(cfg, prompt);
       if (!r.ok) {
-        appendMessage(roomId, { role: 'system', senderId: 'system', content: `刷新失敗:${r.message}(冷卻未消耗,可直接再按一次)` });
+        appendMessage(roomId, { role: 'system', senderId: 'system', content: `刷新失敗:${r.message}(冷卻未消耗，可直接再按一次)` });
         await persist(); notify({ typingBy: '' }); notify({});
         return { ok: false, message: r.message };
       }
       const replies = parseGroupReplies(r.text, participants, 5);
       if (!replies.length) {
-        appendMessage(roomId, { role: 'system', senderId: 'system', content: '這次大家都沒開口(模型輸出無法解析);冷卻未消耗,再按一次試試。' });
+        appendMessage(roomId, { role: 'system', senderId: 'system', content: '這次大家都沒開口(模型輸出無法解析);冷卻未消耗，再按一次試試。' });
         await persist(); notify({ typingBy: '' }); notify({});
-        return { ok: false, message: '這次大家都沒開口,再試一次' };
+        return { ok: false, message: '這次大家都沒開口，再試一次' };
       }
       state.selfChatLastRefresh = Date.now();
       for (const [i, rep] of replies.entries()) {
@@ -534,8 +534,8 @@ export async function selfChat(roomId, notify, opts = {}) {
     const lastUser = getRoomMessages(roomId).filter((m) => m.role === 'user').slice(-1)[0];
     const topic = lastUser ? echoOf(lastUser.content) : '最近那件事';
     const lines = [
-      { c: c1, t: `欸,說到${topic},你們怎麼看?` },
-      { c: c2, t: `${traitOf(c2) ? `我這種${traitOf(c2)}的人` : '我'}只想說:先吃飯再說。` },
+      { c: c1, t: `欸，說到${topic},你們怎麼看？` },
+      { c: c2, t: `${traitOf(c2) ? `我這種${traitOf(c2)}的人` : '我'}只想說：先吃飯再說。` },
       { c: c1, t: '……你每次都這樣。' },
     ];
     for (const [i, l] of lines.entries()) {
@@ -557,11 +557,11 @@ export async function selfChat(roomId, notify, opts = {}) {
 
 /* ------------------------------------------------------------
  * 提案 G:內心話。按需生成「他說這句話當下心裡真正在想什麼」,
- * 存進訊息的 innerVoice 欄(再按=展開,不重打)。素材=本人 DM prompt 範圍。
+ * 存進訊息的 innerVoice 欄(再按=展開，不重打)。素材=本人 DM prompt 範圍。
  * ------------------------------------------------------------ */
 const innerVoiceBusy = new Set();
 
-/** 提案 M:狀態落地(節流:3 小時內已更新過就丟棄,防模型鸚鵡成每回必發)。 */
+/** 提案 M:狀態落地(節流:3 小時內已更新過就丟棄，防模型鸚鵡成每回必發)。 */
 function applyStatusTag(character, statusText) {
   if (!statusText || !character || character.noPhone) return;
   const THROTTLE = 3 * 60 * 60 * 1000;
@@ -576,7 +576,7 @@ export async function generateInnerVoice(roomId, messageId, characterId = null) 
   const msg = (getRoomMessages(roomId) || []).find((m) => m.id === messageId);
   if (!msg) return { ok: false, message: '找不到訊息' };
 
-  // 目標角色:角色訊息=發話者本人;正文旁白=呼叫端指定
+  // 目標角色：角色訊息=發話者本人；正文旁白=呼叫端指定
   let character = null;
   if (msg.role === 'character') {
     character = room.type === 'dm' ? getRoomCharacters(room)[0] : getCharacter(msg.senderId);
@@ -585,7 +585,7 @@ export async function generateInnerVoice(roomId, messageId, characterId = null) 
   }
   if (!character) return { ok: false, message: msg.role === 'narrator' ? '請選擇要窺探的角色' : '只有角色的訊息有心聲' };
 
-  // 快取:角色訊息單欄;旁白多人欄
+  // 快取：角色訊息單欄；旁白多人欄
   if (msg.role === 'character' && msg.innerVoice) return { ok: true, cached: true, text: msg.innerVoice };
   if (msg.role === 'narrator' && msg.innerVoices?.[character.id]) {
     return { ok: true, cached: true, text: msg.innerVoices[character.id] };
@@ -604,9 +604,9 @@ export async function generateInnerVoice(roomId, messageId, characterId = null) 
       const r = await generateReply(cfg, prompt, { tier: 'secondary' });
       if (!r.ok) return { ok: false, message: r.message };
       text = stripNamePrefix(r.text, [character.name]).trim();
-      if (!text) return { ok: false, message: '模型回傳了空內容,再按一次試試' };
+      if (!text) return { ok: false, message: '模型回傳了空內容，再按一次試試' };
     } else {
-      text = '(嘴上說得輕鬆,其實剛剛心跳快得不像話。希望沒被發現。)';
+      text = '(嘴上說得輕鬆，其實剛剛心跳快得不像話。希望沒被發現。)';
     }
     if (msg.role === 'character') {
       msg.innerVoice = text;
@@ -621,7 +621,7 @@ export async function generateInnerVoice(roomId, messageId, characterId = null) 
   }
 }
 
-/** 聊天感模式:把「---」分隔的回覆拆成多則(上限 3),像連發訊息。 */
+/** 聊天感模式：把「---」分隔的回覆拆成多則(上限 3),像連發訊息。 */
 export function splitChatParts(text) {
   return String(text || '')
     .split(/\n\s*-{3,}\s*\n?|^\s*-{3,}\s*$/m)
@@ -630,7 +630,7 @@ export function splitChatParts(text) {
     .slice(0, 3);
 }
 
-/** 從正文輸出抽出「▷ 選項」行:回傳 {content, choices}。 */
+/** 從正文輸出抽出「▷ 選項」行：回傳 {content, choices}。 */
 export function extractStoryChoices(text) {
   const lines = String(text || '').split('\n');
   const choices = [];
@@ -646,7 +646,7 @@ export function extractStoryChoices(text) {
 }
 
 /* ------------------------------------------------------------
- * 角色主動傳訊(刷新觸發,與自主發文同一套節流哲學)
+ * 角色主動傳訊(刷新觸發，與自主發文同一套節流哲學)
  * ------------------------------------------------------------ */
 
 export function chatRefreshCooldownLeft() {
@@ -656,7 +656,7 @@ export function chatRefreshCooldownLeft() {
 }
 
 /**
- * 主動意願評分(純本機計算,零 API 消耗)。
+ * 主動意願評分(純本機計算，零 API 消耗)。
  * 回傳 {score, reason}:分數決定誰更可能來敲你,reason 會告訴模型「他為什麼想傳」。
  */
 export function proactivityScoreFor(roomId) {
@@ -676,25 +676,25 @@ export function proactivityScoreFor(roomId) {
   const last = msgs[msgs.length - 1];
   const now = Date.now();
 
-  // 懸念:角色最後說的是問句,而玩家一直沒回
+  // 懸念：角色最後說的是問句，而玩家一直沒回
   if (last && last.role === 'character' && /[??]\s*$/.test(last.content)) {
     score += 1.2;
-    reasons.push('你上次問了對方一個問題,但對方一直沒有回覆');
+    reasons.push('你上次問了對方一個問題，但對方一直沒有回覆');
   }
-  // 熱絡:24 小時內訊息越多,越可能順勢再敲
+  // 熱絡:24 小時內訊息越多，越可能順勢再敲
   const hot = msgs.filter((m) => now - m.createdAt < 86400000).length;
   if (hot >= 3) {
     score += Math.min(hot, 8) * 0.15;
-    reasons.push('你們最近聊得很熱絡,話題還有延續空間');
+    reasons.push('你們最近聊得很熱絡，話題還有延續空間');
   }
-  // 冷落:太久沒動靜,想起對方
+  // 冷落：太久沒動靜，想起對方
   const lastAt = last?.createdAt || room.createdAt;
   const days = (now - lastAt) / 86400000;
   if (days >= 2) {
     score += Math.min(days, 7) * 0.25;
-    reasons.push(`你們已經 ${Math.floor(days)} 天沒說話了,你有點想他`);
+    reasons.push(`你們已經 ${Math.floor(days)} 天沒說話了，你有點想他`);
   }
-  // 紀念日:今天是你們的特別日子 → 強力加分
+  // 紀念日：今天是你們的特別日子 → 強力加分
   const anni = anniversaryTextFor(character.id);
   if (anni) {
     score += 2.0;
@@ -708,20 +708,20 @@ export function proactivityScoreFor(roomId) {
     const label = h.type === 'annual' ? '每年的今天' : h.type === 'yearly' ? `滿 ${h.n} 年` : `滿 ${h.n} 個月`;
     reasons.unshift(`今天距離「${String(h.memory.content).slice(0, 30)}」${label},你想起了這件事`);
   }
-  // 記憶鉤子:釘選的私密記憶(通常是「之後要一起…」這類重要事項)
+  // 記憶鉤子：釘選的私密記憶(通常是「之後要一起…」這類重要事項)
   const pinned = (getState().memories.byCharacterId[character.id] || []).filter((m) => m.pinned);
   if (pinned.length) {
     score += Math.min(pinned.length, 3) * 0.3;
     reasons.push(`你記得這些事:${pinned.slice(0, 2).map((m) => m.content.slice(0, 30)).join(';')}`);
   }
 
-  return { score, reason: reasons[0] || '沒有特別的理由,就是想到對方了' };
+  return { score, reason: reasons[0] || '沒有特別的理由，就是想到對方了' };
 }
 
 /**
- * 刷新聊天:可能有 0~1 位角色主動傳訊給你(60% 有、40% 沒有)。
+ * 刷新聊天：可能有 0~1 位角色主動傳訊給你(60% 有、40% 沒有)。
  * 依「主動意願」加權抽選(懸念/熱絡/冷落/記憶鉤子/角色主動程度),
- * 並把想傳訊的原因告訴模型,讓內容呼應脈絡而非通用問候。
+ * 並把想傳訊的原因告訴模型，讓內容呼應脈絡而非通用問候。
  * @returns {{ok:boolean, from?:string, message?:string}}
  */
 export async function refreshChats(opts = {}) {
@@ -738,7 +738,7 @@ export async function refreshChats(opts = {}) {
   if (!dms.length) return { ok: true };
   if (rng() >= 0.6) return { ok: true }; // 40%:大家都在忙
 
-  // 意願加權抽選:分數越高越可能被抽中,但保留隨機性
+  // 意願加權抽選：分數越高越可能被抽中，但保留隨機性
   const scored = dms
     .map((r) => ({ room: r, ...proactivityScoreFor(r.id) }))
     .filter((x) => x.score > 0 && !busyRoomIds.has(x.room.id));
@@ -756,7 +756,7 @@ export async function refreshChats(opts = {}) {
   if (!character) return { ok: true };
 
   // 提案 D:未接來電(方案 b,擁有者核准)——high 才常來電、mid 低機率、low/off 永不;
-  // 紀念日當天(提案 C 聯動)機率加成:有件事重要到想直接講。
+  // 紀念日當天(提案 C 聯動)機率加成：有件事重要到想直接講。
   const CALL_CHANCE = { high: 0.3, mid: 0.1 };
   let callChance = CALL_CHANCE[character.proactivity || 'mid'] || 0;
   if (callChance > 0 && anniversaryMemoryHits(character.id, room.id).length) {
@@ -773,8 +773,8 @@ export async function refreshChats(opts = {}) {
       {
         role: 'user',
         content: isCall
-          ? `(系統:你剛才打電話給玩家,但對方沒有接,現在要留一段語音留言。原因:${reason}。來電代表有件事重要到想直接講——交代一件具體的事,或一種憋不住想說的心情;開頭自然,像撥不通之後會說的話。一段完成的話(約 100~250 字),只輸出留言內容本身,不要名字前綴、不要任何標記格式。)`
-          : `(系統:你想主動傳一則訊息給玩家。原因:${reason}。讓訊息自然呼應這個原因——可以延續話題、追問、分享近況。只輸出訊息內容本身,1~2 句,不要名字前綴。)`,
+          ? `(系統：你剛才打電話給玩家，但對方沒有接，現在要留一段語音留言。原因:${reason}。來電代表有件事重要到想直接講——交代一件具體的事，或一種憋不住想說的心情；開頭自然，像撥不通之後會說的話。一段完成的話(約 100~250 字),只輸出留言內容本身，不要名字前綴、不要任何標記格式。)`
+          : `(系統：你想主動傳一則訊息給玩家。原因:${reason}。讓訊息自然呼應這個原因——可以延續話題、追問、分享近況。只輸出訊息內容本身,1~2 句，不要名字前綴。)`,
       },
     ];
     const r = await generateReply(cfg, prompt);
@@ -784,13 +784,13 @@ export async function refreshChats(opts = {}) {
     const seed = hashStr(character.id) + Math.floor(Date.now() / 60000);
     if (isCall) {
       content = pick([
-        '喂?……沒接喔。也沒什麼大事,就是剛剛突然很想聽你的聲音。看到回我一下。',
-        '是我。有件事想直接跟你說,結果你沒接……算了,等你回電,別太晚。',
-        '你在忙吧。我留個言:今天發生了一件事,我第一個想到的就是你。回來打給我。',
+        '喂?……沒接喔。也沒什麼大事，就是剛剛突然很想聽你的聲音。看到回我一下。',
+        '是我。有件事想直接跟你說，結果你沒接……算了，等你回電，別太晚。',
+        '你在忙吧。我留個言：今天發生了一件事，我第一個想到的就是你。回來打給我。',
       ], seed);
     } else content = pick([
-      '欸,突然想到你。最近还好嗎?',
-      '在忙嗎?沒事,就想丟個訊息。',
+      '欸，突然想到你。最近还好嗎？',
+      '在忙嗎？沒事，就想丟個訊息。',
       `${traitOf(character) ? `${traitOf(character)}的人` : '我'}也是會先開口的。哈囉。`,
       '路過。想說看你上線沒。',
     ], seed).replace('还','還');

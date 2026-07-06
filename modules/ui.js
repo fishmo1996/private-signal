@@ -1,7 +1,7 @@
 /**
  * modules/ui.js
  * 所有畫面渲染與互動。
- * 結構:鎖定畫面 → 主畫面(App 網格)→ 各 App 頁面(聊天/社群/正文/角色與玩家/設定)。
+ * 結構：鎖定畫面 → 主畫面(App 網格)→ 各 App 頁面(聊天/社群/正文/角色與玩家/設定)。
  * 右側為預設收合的「管理輔助面板」(記憶管理與開發資訊),不屬於手機本體。
  */
 
@@ -142,7 +142,7 @@ function currentAccent() {
 }
 
 /**
- * App 頁面共用的標題列:明顯的返回鍵 + 標題 + 右側動作。
+ * App 頁面共用的標題列：明顯的返回鍵 + 標題 + 右側動作。
  * 返回鍵會標出目的地(例如「← 主畫面」「← 聊天」),不做成看不懂的小圖示。
  */
 function appHeader(title, { rightHtml = '', subtitle = '', leadingHtml = '' } = {}) {
@@ -218,7 +218,7 @@ export function initUI() {
     if (e.key === 'Escape') closeModal();
   });
 
-  // 鎖屏與主畫面的時鐘,每 20 秒對時一次
+  // 鎖屏與主畫面的時鐘，每 20 秒對時一次
   clockTimer = setInterval(() => {
     const v = getView();
     if (v === 'lock') {
@@ -338,7 +338,7 @@ function renderHome() {
 
 /* ---------------- C. 聊天 App ---------------- */
 
-/** 聊天 App:好友(DM)與聊天室(群聊)兩個分頁,底部可切換。 */
+/** 聊天 App:好友(DM)與聊天室(群聊)兩個分頁，底部可切換。 */
 function renderChatApp(tab) {
   const state = getState();
 
@@ -416,13 +416,13 @@ function renderChatApp(tab) {
   }
 }
 
-/** 好友分頁:每位角色一列(頭像、名字、最近訊息預覽、時間)。 */
+/** 好友分頁：每位角色一列(頭像、名字、最近訊息預覽、時間)。 */
 function friendRowsHtml() {
   const state = getState();
   if (!state.characters.length) {
     return `
       <div class="list-empty">
-        還沒有好友。<br>新增角色後,每位角色都會有一間專屬私訊。
+        還沒有好友。<br>新增角色後，每位角色都會有一間專屬私訊。
         <button class="primary-btn slim" id="btnEmptyAdd">＋ 新增角色</button>
       </div>`;
   }
@@ -443,7 +443,7 @@ function rowOfDm(c, dm) {
       <button class="list-row" data-open-room="${esc(dm.id)}">
         ${avatarHtml(c)}
         <span class="list-main">
-          <span class="list-title">${esc(c.name)}${dm.branchedFrom ? ' <span class="branch-tag">⑂分岔</span>' : ''}${getState().settings.moodEmoji !== false && dm.mood?.emoji ? ` ${dm.mood.emoji}` : ''}${dm.unread ? ' <span class="unread-dot" aria-label="未讀"></span>' : ''}</span>
+          <span class="list-title">${esc(c.name)}${c.label?.trim() ? ` <span class="char-label">${esc(c.label.trim())}</span>` : ''}${dm.branchedFrom ? ' <span class="branch-tag">⑂分岔</span>' : ''}${getState().settings.moodEmoji !== false && dm.mood?.emoji ? ` ${dm.mood.emoji}` : ''}${dm.unread ? ' <span class="unread-dot" aria-label="未讀"></span>' : ''}</span>
           ${c.status?.text ? `<span class="char-status">${esc(c.status.text)}</span>` : ''}
           <span class="list-preview">${esc(preview)}</span>
         </span>
@@ -452,12 +452,12 @@ function rowOfDm(c, dm) {
 }
 
 
-/** 旁觀分頁:角色們自己的群組,你只能偷看。 */
+/** 旁觀分頁：角色們自己的群組，你只能偷看。 */
 function peekRowsHtml() {
   const state = getState();
   const peeks = state.rooms.filter((r) => r.type === 'peek');
   if (!peeks.length) {
-    return `<div class="list-empty">還沒有旁觀群。<br>建一個「你不在裡面」的群,按 ↻ 偷看他們聊什麼。</div>`;
+    return `<div class="list-empty">還沒有旁觀群。<br>建一個「你不在裡面」的群，按 ↻ 偷看他們聊什麼。</div>`;
   }
   return peeks.map((r) => {
     const last = (state.messagesByRoom[r.id] || []).slice(-1)[0];
@@ -483,10 +483,10 @@ function openPeekModal() {
   }
   openModal(`
     <h3>建立旁觀群</h3>
-    <p class="panel-note">你不在這個群裡:他們用共同知道的事聊天(公開資訊+共享記憶+彼此關係),按 ↻ 讓他們聊起來,你只能看。任何人的私訊祕密不會出現在這裡。</p>
+    <p class="panel-note">你不在這個群裡：他們用共同知道的事聊天(公開資訊+共享記憶+彼此關係),按 ↻ 讓他們聊起來，你只能看。任何人的私訊祕密不會出現在這裡。</p>
     <form id="peekForm">
       <label class="field">群組名稱
-        <input name="title" required maxlength="30" placeholder="例:三缺一(沒有你)">
+        <input name="title" required maxlength="30" placeholder="例：三缺一(沒有你)">
       </label>
       <div class="field-label">成員(至少 2 位):</div>
       <div class="check-list">
@@ -510,14 +510,14 @@ function openPeekModal() {
   });
 }
 
-/** 聊天室分頁:群聊列表。 */
+/** 聊天室分頁：群聊列表。 */
 function groupRowsHtml() {
   const state = getState();
   const groups = state.rooms.filter((r) => r.type === 'group');
   if (!groups.length) {
     return `
       <div class="list-empty">
-        還沒有聊天室。<br>把兩位以上的角色拉進同一個房間,看他們怎麼接話。
+        還沒有聊天室。<br>把兩位以上的角色拉進同一個房間，看他們怎麼接話。
         <button class="primary-btn slim" id="btnEmptyAdd">＋ 建立聊天室</button>
       </div>`;
   }
@@ -650,8 +650,8 @@ function renderRoomView() {
     statusBarBtn.addEventListener('click', () => {
       openModal(`
         <h3>場景狀態</h3>
-        <p class="panel-note">會置頂進入說書人 prompt(「以此為準」),劇情時間、地點、衣著、天氣都寫這裡;隨劇情推進隨手更新。</p>
-        <textarea id="statusBarBox" rows="3" maxlength="300" placeholder="八月十二日 傍晚/海邊民宿的露台/阿莫:白色洋裝,頭髮還是濕的">${esc(room.statusBar || '')}</textarea>
+        <p class="panel-note">會置頂進入說書人 prompt(「以此為準」),劇情時間、地點、衣著、天氣都寫這裡；隨劇情推進隨手更新。</p>
+        <textarea id="statusBarBox" rows="3" maxlength="300" placeholder="八月十二日 傍晚/海邊民宿的露台/阿莫：白色洋裝，頭髮還是濕的">${esc(room.statusBar || '')}</textarea>
         <div class="form-actions"><button class="primary-btn slim" id="btnStatusBarSave">儲存</button></div>`, {
         onOpen(root) {
           root.querySelector('#btnStatusBarSave').addEventListener('click', async () => {
@@ -688,7 +688,7 @@ function renderRoomView() {
   if (deletable) {
     els.phoneScreen.querySelector('#__delProxy').addEventListener('click', () => {
       openConfirmModal({
-        title: room.type === 'group' ? '刪除這個聊天室?' : '刪除這個場景?',
+        title: room.type === 'group' ? '刪除這個聊天室？' : '刪除這個場景？',
         body: `「${room.title}」與其中的訊息會被移除。這個動作無法復原。`,
         confirmLabel: '刪除',
         onConfirm: async () => {
@@ -706,7 +706,7 @@ function renderRoomView() {
 
   els.phoneScreen.querySelector('#btnRoomPersona')?.addEventListener('click', () => {
     openPersonaSelectModal({
-      title: `這個對話中,你是誰?`,
+      title: `這個對話中，你是誰？`,
       current: room.personaId,
       onSelect: async (pid) => {
         room.personaId = pid;
@@ -786,7 +786,7 @@ function renderRoomView() {
   renderMessages();
 }
 
-/** 訊息視窗切片:只渲染最近 count 則(長對話效能)。 */
+/** 訊息視窗切片：只渲染最近 count 則(長對話效能)。 */
 export function windowMessages(all, count) {
   const n = Math.max(0, all.length - Math.max(1, count));
   return { msgs: all.slice(n), hiddenCount: n };
@@ -814,7 +814,7 @@ function renderMessages() {
 
   const html = msgs.map((m, i) => {
     const time = showTime ? `<span class="msg-time">${fmtTime(m.createdAt)}</span>` : '';
-    const isLast = i === msgs.length - 1; // 視窗永遠含最新一則,尾=全量尾
+    const isLast = i === msgs.length - 1; // 視窗永遠含最新一則，尾=全量尾
     const speakBtn = (m.role === 'character' || m.role === 'narrator') && ttsAvailable()
       ? `<button class="remember-btn" data-speak="${esc(m.id)}" aria-label="朗讀">${speakingMessageKey() === m.id ? '■' : '▶'}</button>`
       : '';
@@ -896,14 +896,14 @@ function renderMessages() {
 
   wrap.innerHTML = loadOlderHtml + html + typing + regenBtn;
   if (pendingScrollAnchor !== null) {
-    // 剛載入更早的訊息:維持原本閱讀位置(新高度差補回去)
+    // 剛載入更早的訊息：維持原本閱讀位置(新高度差補回去)
     wrap.scrollTop = wrap.scrollHeight - pendingScrollAnchor;
     pendingScrollAnchor = null;
   } else {
     wrap.scrollTop = wrap.scrollHeight;
   }
 
-  // 點訊息切換操作列(記住/編輯/刪除/▶ 平常隱藏,閱讀零噪音)
+  // 點訊息切換操作列(記住/編輯/刪除/▶ 平常隱藏，閱讀零噪音)
   if (!wrap.dataset.tapBound) {
     wrap.dataset.tapBound = '1';
     wrap.addEventListener('click', (e) => {
@@ -999,7 +999,7 @@ function renderMessages() {
   wrap.querySelectorAll('[data-msg-branch]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const sure = typeof window !== 'undefined' && window.confirm
-        ? window.confirm('從這則訊息分岔:將建立到此為止的新聊天室副本,原房完全不受影響。繼續?')
+        ? window.confirm('從這則訊息分岔：將建立到此為止的新聊天室副本，原房完全不受影響。繼續？')
         : true;
       if (!sure) return;
       const nr = await branchRoom(room.id, btn.dataset.msgBranch);
@@ -1017,7 +1017,7 @@ function renderMessages() {
   wrap.querySelectorAll('[data-msg-del]').forEach((btn) => {
     btn.addEventListener('click', () => {
       openConfirmModal({
-        title: '刪除這則訊息?',
+        title: '刪除這則訊息？',
         body: '訊息會從對話中移除(角色之後就不會再「記得」它)。這個動作無法復原。',
         confirmLabel: '刪除',
         onConfirm: async () => {
@@ -1064,7 +1064,7 @@ function renderSocialFeed() {
 
   els.phoneScreen.innerHTML = `
     ${appHeader('社群', {
-      leadingHtml: `<button class="persona-chip" id="btnFeedPersona" title="目前身分,點擊切換">${personaAvatarHtml(getPersona(getState().activePersonaId) || defaultPersona(), 'sm')}</button>`,
+      leadingHtml: `<button class="persona-chip" id="btnFeedPersona" title="目前身分，點擊切換">${personaAvatarHtml(getPersona(getState().activePersonaId) || defaultPersona(), 'sm')}</button>`,
       rightHtml: '<button class="header-action" id="btnRefreshFeed">↻ 動態</button>'
         + '<button class="header-action" id="btnNewPost">＋ 發貼文</button>',
     })}
@@ -1072,7 +1072,7 @@ function renderSocialFeed() {
     <div class="phone-list feed">
       ${cards || `
         <div class="list-empty">
-          這裡還沒有任何動態。<br>發第一篇貼文,或先去新增角色——他們也會發文。
+          這裡還沒有任何動態。<br>發第一篇貼文，或先去新增角色——他們也會發文。
         </div>`}
     </div>`;
 
@@ -1080,7 +1080,7 @@ function renderSocialFeed() {
   els.phoneScreen.querySelector('#btnNewPost').addEventListener('click', openNewPostModal);
   els.phoneScreen.querySelector('#btnFeedPersona').addEventListener('click', () => {
     openPersonaSelectModal({
-      title: '在社群裡,你現在是誰?',
+      title: '在社群裡，你現在是誰？',
       current: getState().activePersonaId,
       onSelect: async (pid) => {
         getState().activePersonaId = pid;
@@ -1141,7 +1141,7 @@ function renderSocialPost() {
 
   const comments = getComments(post.id);
 
-  // FB 式巢狀:依 replyTo.commentId 找出每則留言所屬的討論串根
+  // FB 式巢狀：依 replyTo.commentId 找出每則留言所屬的討論串根
   const byId = new Map(comments.map((c2) => [c2.id, c2]));
   const rootOf = (c2) => {
     let cur = c2; let hops = 0;
@@ -1210,7 +1210,7 @@ function renderSocialPost() {
       ${errorBanner}
     </div>
     <div class="composer">
-      <textarea id="commentInput" rows="1" placeholder="留個言…(公開,所有角色都看得到)" aria-label="留言輸入框"></textarea>
+      <textarea id="commentInput" rows="1" placeholder="留個言…(公開，所有角色都看得到)" aria-label="留言輸入框"></textarea>
       <button class="send-btn" id="btnComment" aria-label="送出留言">送出</button>
     </div>`;
 
@@ -1219,7 +1219,7 @@ function renderSocialPost() {
 
   els.phoneScreen.querySelector('#btnDeletePost').addEventListener('click', () => {
     openConfirmModal({
-      title: '刪除這篇貼文?',
+      title: '刪除這篇貼文？',
       body: '貼文與底下的留言都會被移除。這個動作無法復原。',
       confirmLabel: '刪除',
       onConfirm: async () => {
@@ -1259,9 +1259,9 @@ function renderSocialPost() {
         : authorName(post.authorId);
       openModal(`
         <h3>私下跟 ${esc(c.name)} 聊這個</h3>
-        <div class="panel-note">會把這篇貼文的引用卡帶進你們的私訊,話題從廣場拉到兩人之間。</div>
+        <div class="panel-note">會把這篇貼文的引用卡帶進你們的私訊，話題從廣場拉到兩人之間。</div>
         <label class="field">想說什麼
-          <textarea id="dmTopicMsg" rows="2" maxlength="500" placeholder="你剛剛那則留言是什麼意思?"></textarea>
+          <textarea id="dmTopicMsg" rows="2" maxlength="500" placeholder="你剛剛那則留言是什麼意思？"></textarea>
         </label>
         <div class="form-actions"><button class="primary-btn slim" id="btnDmTopicSend">送出並前往私訊</button></div>`, {
         onOpen(root) {
@@ -1358,7 +1358,7 @@ function renderSocialPost() {
 }
 
 /**
- * 玩家發文/留言後,依 mock 機制產生角色留言(1 位主回覆 + 0~2 位補充)。
+ * 玩家發文/留言後，依 mock 機制產生角色留言(1 位主回覆 + 0~2 位補充)。
  * 僅使用公開資訊(角色公開設定、貼文內容、共享記憶)。
  */
 async function runMockSocialReplies(post, triggerText, triggerPersonaId = null, replyToName = null, threadReplyTo = null) {
@@ -1429,7 +1429,7 @@ function renderStoryList() {
 
 /* ---------------- G. 角色與玩家 App ---------------- */
 
-/** 全域搜尋:訊息/記憶/貼文/日記。 */
+/** 全域搜尋：訊息/記憶/貼文/日記。 */
 function renderSearch() {
   els.phoneScreen.innerHTML = `
     ${appHeader('搜尋')}
@@ -1437,7 +1437,7 @@ function renderSearch() {
       <div class="composer" style="padding:0 0 10px">
         <input id="searchBox" placeholder="搜尋訊息、記憶、貼文、日記…" aria-label="搜尋" autofocus>
       </div>
-      <div id="searchResults"><div class="panel-note">「那句話他在哪裡說的?」——打幾個字就知道。</div></div>
+      <div id="searchResults"><div class="panel-note">「那句話他在哪裡說的？」——打幾個字就知道。</div></div>
     </div>`;
   bindBack();
   const box = els.phoneScreen.querySelector('#searchBox');
@@ -1492,7 +1492,7 @@ function renderSearch() {
   box.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 200); });
 }
 
-/** 回憶相簿:照片只在本機;進 prompt 的是描述文字,分享時才給模型看圖。 */
+/** 回憶相簿：照片只在本機；進 prompt 的是描述文字，分享時才給模型看圖。 */
 function renderAlbum() {
   const state = getState();
   const photos = getPhotos();
@@ -1500,14 +1500,14 @@ function renderAlbum() {
     ${appHeader('相簿', { rightHtml: '<button class="header-action" id="btnAddPhoto">＋ 新增回憶</button>' })}
     <input type="file" id="photoFile" accept="image/*" hidden>
     <div class="phone-list">
-      <div class="panel-note" style="margin:0 2px 10px">照片只存在這台裝置;被標註在場的角色會「記得」描述文字,聊天中可分享照片給他看。</div>
+      <div class="panel-note" style="margin:0 2px 10px">照片只存在這台裝置；被標註在場的角色會「記得」描述文字，聊天中可分享照片給他看。</div>
       ${photos.length ? `<div class="album-grid">
         ${photos.map((p) => `
           <button class="album-cell" data-open-photo="${esc(p.id)}" aria-label="檢視回憶">
             <img src="${p.image}" alt="">
             <span class="album-caption">${esc(p.caption || '(未命名)')}</span>
           </button>`).join('')}
-      </div>` : '<div class="list-empty">還沒有回憶。跑完一場好劇情,幫它留一張照片吧。</div>'}
+      </div>` : '<div class="list-empty">還沒有回憶。跑完一場好劇情，幫它留一張照片吧。</div>'}
     </div>`;
   bindBack();
 
@@ -1538,9 +1538,9 @@ function openPhotoModal(photo, image) {
     <img class="album-full" src="${image}" alt="回憶照片">
     <form id="photoForm">
       <label class="field">回憶描述(角色會記得這句話)
-        <input name="caption" maxlength="60" required value="${esc(photo?.caption || '')}" placeholder="例:八月,和子勳在海邊看日落">
+        <input name="caption" maxlength="60" required value="${esc(photo?.caption || '')}" placeholder="例：八月，和子勳在海邊看日落">
       </label>
-      <label class="field">日期(自由填,可留空)
+      <label class="field">日期(自由填，可留空)
         <input name="dateText" maxlength="20" value="${esc(photo?.dateText || '')}" placeholder="2026/8/12 或「八月的某天」">
       </label>
       <div class="field-label">在場角色(勾選的人才會記得):</div>
@@ -1589,7 +1589,7 @@ function openPhotoModal(photo, image) {
   });
 }
 
-/** 分享回憶照片到聊天:走一般傳圖流程,那一輪模型會真的看到圖。 */
+/** 分享回憶照片到聊天：走一般傳圖流程，那一輪模型會真的看到圖。 */
 function openSharePhotoModal(photo) {
   const state = getState();
   const rooms = state.rooms.filter((r) => r.type === 'dm' || r.type === 'group');
@@ -1633,7 +1633,7 @@ function renderPlayer() {
   els.phoneScreen.innerHTML = `
     ${appHeader('玩家', { rightHtml: '<button class="header-action" id="btnNewPersona">＋ 新增人設</button>' })}
     <div class="phone-list">
-      <div class="panel-note" style="margin:0 2px 10px">你可以有多個「你」:每個角色認識其中一個,對話與發文都能切換身分。</div>
+      <div class="panel-note" style="margin:0 2px 10px">你可以有多個「你」：每個角色認識其中一個，對話與發文都能切換身分。</div>
       ${getPersonas().map((ps) => `
         <button class="profile-card" data-edit-persona="${esc(ps.id)}" aria-label="編輯人設 ${esc(ps.name)}">
           ${personaAvatarHtml(ps)}
@@ -1658,7 +1658,7 @@ function renderPeople() {
     <button class="list-row" data-open-char="${esc(c.id)}">
       ${avatarHtml(c)}
       <span class="list-main">
-        <span class="list-title">${esc(c.name)}</span>
+        <span class="list-title">${esc(c.name)}${c.label?.trim() ? ` <span class="char-label">${esc(c.label.trim())}</span>` : ''}</span>
         <span class="list-preview">${esc(firstLine(c.description || c.personality, 22) || '尚未填寫描述')}</span>
       </span>
       <span class="list-chevron" aria-hidden="true">›</span>
@@ -1729,10 +1729,10 @@ function renderCharacterDetail() {
         ${characterFormFields(c)}
         ${getState().characters.filter((o) => o.id !== c.id).length ? `
           <details class="mem-group rel-group" ${Object.values(c.relationships || {}).some((v) => v?.trim()) ? '' : ''}>
-            <summary class="mem-subheading">與其他角色的關係(已填 ${Object.values(c.relationships || {}).filter((v) => v?.trim()).length}/${getState().characters.length - 1};留空=不提,只在雙方同場注入)</summary>
+            <summary class="mem-subheading">與其他角色的關係(已填 ${Object.values(c.relationships || {}).filter((v) => v?.trim()).length}/${getState().characters.length - 1};留空=不提，只在雙方同場注入)</summary>
             ${getState().characters.filter((o) => o.id !== c.id).map((o) => `
               <label class="field">${esc(c.name)} 對 ${esc(o.name)}
-                <input name="rel_${esc(o.id)}" maxlength="80" value="${esc(c.relationships?.[o.id] || '')}" placeholder="例:互看不順眼但默契絕佳的隊友">
+                <input name="rel_${esc(o.id)}" maxlength="80" value="${esc(c.relationships?.[o.id] || '')}" placeholder="例：互看不順眼但默契絕佳的隊友">
               </label>`).join('')}
           </details>
         ` : ''}
@@ -1752,7 +1752,7 @@ function renderCharacterDetail() {
   if (voiceTest) {
     voiceTest.addEventListener('click', () => {
       const f = els.phoneScreen.querySelector('#charEditForm');
-      toggleSpeak(`test_${c.id}`, `嗨,我是${c.name}。還記得海邊那天嗎?`, {
+      toggleSpeak(`test_${c.id}`, `嗨，我是${c.name}。還記得海邊那天嗎？`, {
         voiceURI: f.voiceURI.value, rate: f.vrate.value, pitch: f.vpitch.value,
       });
     });
@@ -1796,8 +1796,8 @@ function renderCharacterDetail() {
 
   els.phoneScreen.querySelector('#btnDeleteChar').addEventListener('click', () => {
     openConfirmModal({
-      title: `讓「${c.name}」離開這支手機?`,
-      body: '這個角色、他的私訊、私密記憶、社群貼文,以及只剩他撐著的聊天室都會被移除。這個動作無法復原。',
+      title: `讓「${c.name}」離開這支手機？`,
+      body: '這個角色、他的私訊、私密記憶、社群貼文，以及只剩他撐著的聊天室都會被移除。這個動作無法復原。',
       confirmLabel: '讓他離開',
       onConfirm: async () => {
         await deleteCharacter(c.id);
@@ -1894,7 +1894,7 @@ function apiSectionHtml() {
         </div>
         <input id="apiModel" value="${esc(cfg.model)}" placeholder="或直接手動輸入模型名稱">
       </label>
-      <label class="field">次要模型(選填;同金鑰,雜務用便宜模型省錢)
+      <label class="field">次要模型(選填；同金鑰，雜務用便宜模型省錢)
         <div class="model-row">
           <select id="apiModelSelect2">
             <option value="">— 不使用次要模型 —</option>
@@ -1902,15 +1902,15 @@ function apiSectionHtml() {
           </select>
         </div>
         <input id="apiModel2" value="${esc(cfg.secondaryModel || '')}" placeholder="留空=一切照舊全走主要模型">
-        <span class="setting-hint">有設定時:記憶摘要與章節封存自動走次要;下方開關可讓社群/日記也走次要。私訊/群聊/正文/旁觀永遠走主要。</span>
+        <span class="setting-hint">有設定時：記憶摘要與章節封存自動走次要；下方開關可讓社群/日記也走次要。私訊/群聊/正文/旁觀永遠走主要。</span>
       </label>
       <label class="check-field api-toggle">
         <input type="checkbox" id="chkSecondarySocial" ${getState().settings.secondaryForSocialDiary ? 'checked' : ''}>
-        社群發文/留言與日記也使用次要模型(內容你會讀,品質有感,自己試試)
+        社群發文/留言與日記也使用次要模型(內容你會讀，品質有感，自己試試)
       </label>
       <label class="check-field api-toggle">
         <input type="checkbox" id="chkUseRealApi" ${cfg.useRealApi ? 'checked' : ''}>
-        使用真實 AI 回覆(私訊/群聊/正文全模式;群聊為單次呼叫產多角色訊息)
+        使用真實 AI 回覆(私訊/群聊/正文全模式；群聊為單次呼叫產多角色訊息)
       </label>
       <div class="field-label">每模式單則回覆字數上限</div>
       <div class="field-row">
@@ -1939,7 +1939,7 @@ function apiSectionHtml() {
           <input id="apiThink" type="number" min="0" step="1" value="${esc(String(cfg.thinkingBudget ?? ''))}" placeholder="留空=預設">
         </label>
       </div>
-      <label class="field">上下文預算(字;對話歷史由新到舊裝進 prompt,裝滿即止——正文自動少帶幾則、短訊自動多帶)
+      <label class="field">上下文預算(字；對話歷史由新到舊裝進 prompt,裝滿即止——正文自動少帶幾則、短訊自動多帶)
         <input id="apiBudget" type="number" min="2000" step="1000" value="${cfg.contextBudget || 20000}">
       </label>
       <label class="field">內容安全等級(僅 Gemini;對映官方 safetySettings 參數)
@@ -1949,7 +1949,7 @@ function apiSectionHtml() {
           <option value="none" ${cfg.safetyLevel === 'none' ? 'selected' : ''}>最寬(BLOCK_NONE,成人請自行負責)</option>
         </select>
       </label>
-      <div class="panel-note">溫度:創作建議 0.9~1.2。思考預算(Gemini 2.5+):0=關閉思考最省額度;留空用模型預設;數字越大推理越深但更貴更慢。內容被安全層擋下時,錯誤訊息會顯示「模型回傳了空內容」。</div>
+      <div class="panel-note">溫度：創作建議 0.9~1.2。思考預算(Gemini 2.5+):0=關閉思考最省額度；留空用模型預設；數字越大推理越深但更貴更慢。內容被安全層擋下時，錯誤訊息會顯示「模型回傳了空內容」。</div>
       <div class="form-actions">
         <button class="ghost-btn slim" id="btnApiTest">測試連線</button>
         <button class="ghost-btn slim" id="btnApiModels">取得模型列表</button>
@@ -2004,7 +2004,7 @@ function bindApiSection() {
     say(r.message, r.ok);
   });
 
-  // 下拉選單選了什麼,就同步進手動輸入欄(儲存以輸入欄為準)
+  // 下拉選單選了什麼，就同步進手動輸入欄(儲存以輸入欄為準)
   els.phoneScreen.querySelector('#apiModelSelect').addEventListener('change', (e) => {
     if (e.target.value) els.phoneScreen.querySelector('#apiModel').value = e.target.value;
   });
@@ -2055,7 +2055,7 @@ function openCardPreviewModal(card) {
       描述:${esc((card.description || '(無)').slice(0, 80))}${(card.description || '').length > 80 ? '…' : ''}<br>
       第一則訊息:${esc((card.firstMessage || '(無)').slice(0, 50))}${(card.firstMessage || '').length > 50 ? '…' : ''}
     </div>
-    <div class="panel-note">將以「建立新角色」方式匯入(附新私訊,不覆蓋任何既有角色)。${bookCount ? '內嵌世界書會建立為新書並綁定此角色。' : ''}</div>
+    <div class="panel-note">將以「建立新角色」方式匯入(附新私訊，不覆蓋任何既有角色)。${bookCount ? '內嵌世界書會建立為新書並綁定此角色。' : ''}</div>
     <div class="form-actions">
       <button class="primary-btn slim" id="btnCardConfirm">確認匯入</button>
       <button class="ghost-btn slim" id="btnCardCancel">取消</button>
@@ -2093,7 +2093,7 @@ function openCardExportModal(c) {
     <h3>匯出「${esc(c.name)}」</h3>
     <p class="panel-note">兩種格式都不含 API 金鑰、聊天紀錄與私密記憶。綁定這個角色的世界書會一併打包。</p>
     <div class="form-actions" style="flex-direction:column; align-items:stretch">
-      <button class="primary-btn slim" id="btnExpPack">匯出完整角色包(本站格式,含頭像/主題色)</button>
+      <button class="primary-btn slim" id="btnExpPack">匯出完整角色包(本站格式，含頭像/主題色)</button>
       <button class="ghost-btn slim" id="btnExpV2">匯出通用角色卡 JSON(Character Card V2 相容)</button>
     </div>`, {
     onOpen(root) {
@@ -2239,8 +2239,8 @@ function renderWorldbookList() {
       const total = books.reduce((n, b) => n + b.entries.length, 0);
       const kwCount = books.reduce((n, b) => n + b.entries.reduce((m, e) => m + e.keywords.length, 0), 0);
       openConfirmModal({
-        title: `匯入 ${books.length} 本世界書?`,
-        body: `${books.map((b) => `「${b.name}」`).join('、')},共 ${total} 個條目、${kwCount} 個觸發關鍵字。將建立為新書(全域生效,可再改綁定),不會覆蓋任何既有世界書。`,
+        title: `匯入 ${books.length} 本世界書？`,
+        body: `${books.map((b) => `「${b.name}」`).join('、')},共 ${total} 個條目、${kwCount} 個觸發關鍵字。將建立為新書(全域生效，可再改綁定),不會覆蓋任何既有世界書。`,
         confirmLabel: '匯入',
         onConfirm: async () => {
           await importWorldbooks(books);
@@ -2286,7 +2286,7 @@ function renderWorldbookDetail() {
     <div class="wb-entry ${e.enabled ? '' : 'off'}">
       <div class="wb-entry-head">
         <span class="wb-entry-title">${e.alwaysOn ? '📌 ' : ''}${esc(e.title)}</span>
-        <span class="wb-entry-keys">${e.alwaysOn ? '常駐' : esc((e.keywords || []).join('、') || '(無關鍵字)')} · 權重 ${e.priority ?? 100}</span>
+        <span class="wb-entry-keys">${e.alwaysOn ? '常駐' : esc((e.keywords || []).join('、') || '(無關鍵字)')}${!e.alwaysOn && (e.secondaryKeywords || []).length ? ` ⛩${esc((e.secondaryKeywords).join('、'))}` : ''} · 權重 ${e.priority ?? 100}</span>
       </div>
       <div class="wb-entry-content">${esc(e.content)}</div>
       <div class="mem-actions">
@@ -2315,7 +2315,7 @@ function renderWorldbookDetail() {
         </label>
         <div class="field-label">或只綁定特定角色:</div>
         <div class="check-list">${charChecks || '<div class="panel-empty small">尚無角色</div>'}</div>
-        <div class="field-label">或綁定特定聊天室(該對話中生效,適合場景專用設定):</div>
+        <div class="field-label">或綁定特定聊天室(該對話中生效，適合場景專用設定):</div>
         <div class="check-list">${roomChecks || '<div class="panel-empty small">尚無聊天室</div>'}</div>
         <div class="form-actions">
           <button type="submit" class="primary-btn slim">儲存設定</button>
@@ -2328,7 +2328,7 @@ function renderWorldbookDetail() {
 
   bindBack();
 
-  // 全域勾選時,即時停用角色勾選框
+  // 全域勾選時，即時停用角色勾選框
   const metaForm = els.phoneScreen.querySelector('#wbMetaForm');
   metaForm.querySelector('input[name="global"]').addEventListener('change', (e) => {
     metaForm.querySelectorAll('input[name="bindChar"], input[name="bindRoom"]').forEach((cb) => { cb.disabled = e.target.checked; });
@@ -2351,7 +2351,7 @@ function renderWorldbookDetail() {
 
   els.phoneScreen.querySelector('#btnDelBook').addEventListener('click', () => {
     openConfirmModal({
-      title: `刪除「${book.name}」?`,
+      title: `刪除「${book.name}」？`,
       body: '這本世界書與其中所有條目都會被移除。角色與聊天資料不受影響。',
       confirmLabel: '刪除',
       onConfirm: async () => {
@@ -2394,14 +2394,17 @@ function openEntryModal(bookId, entry = null) {
       <label class="field">觸發關鍵字(逗號或頓號分隔)
         <input name="keywords" maxlength="300" value="${esc((entry?.keywords || []).join('、'))}" placeholder="例如:OFFSET、樂團、主唱">
       </label>
+      <label class="field">次要關鍵字(選填；有填時=上面命中「且」這裡任一也在場才觸發。在場=最近對話出現過，或是本聊天室角色的名字。用來讓「哥哥」「媽媽」這種泛用詞不亂觸發)
+        <input name="secondaryKeywords" maxlength="300" value="${esc((entry?.secondaryKeywords || []).join('、'))}" placeholder="例如：莫映里、映宣(留空=照舊)">
+      </label>
       <label class="field">內容(被觸發時進入 prompt)
         <textarea name="content" rows="5" maxlength="4000" data-counter>${esc(entry?.content || '')}</textarea>
         <span class="char-count"></span>
       </label>
       <label class="check-field">
-        <input type="checkbox" name="alwaysOn" ${entry?.alwaysOn ? 'checked' : ''}> 常駐(不需關鍵字,永遠進入 prompt,較耗 token)
+        <input type="checkbox" name="alwaysOn" ${entry?.alwaysOn ? 'checked' : ''}> 常駐(不需關鍵字，永遠進入 prompt,較耗 token)
       </label>
-      <label class="field">權重(同時觸發搶位子時,數字大的優先;預設 100)
+      <label class="field">權重(同時觸發搶位子時，數字大的優先；預設 100)
         <input name="priority" type="number" step="10" value="${entry?.priority ?? 100}">
       </label>
       <div class="form-actions"><button type="submit" class="primary-btn slim">${entry ? '儲存' : '新增'}</button></div>
@@ -2414,6 +2417,7 @@ function openEntryModal(bookId, entry = null) {
         const data = {
           title: fd.get('title'),
           keywords: parseKeywords(fd.get('keywords')),
+          secondaryKeywords: parseKeywords(fd.get('secondaryKeywords')),
           content: fd.get('content'),
           alwaysOn: !!fd.get('alwaysOn'),
           priority: Number(fd.get('priority')),
@@ -2442,7 +2446,7 @@ function renderSettings() {
         <select id="selTheme" class="theme-select">
           <option value="dusk" ${state.settings.theme !== 'sage' ? 'selected' : ''}>暮霧(深色)</option>
           <option value="sage" ${state.settings.theme === 'sage' ? 'selected' : ''}>青霧(淺綠護眼)</option>
-          <option value="berry" ${state.settings.theme === 'berry' ? 'selected' : ''}>甜莓(粉嫩,配可愛圖示包)</option>
+          <option value="berry" ${state.settings.theme === 'berry' ? 'selected' : ''}>甜莓(粉嫩，配可愛圖示包)</option>
         </select>
       </label>
       <div class="setting-row">
@@ -2456,7 +2460,7 @@ function renderSettings() {
 
       <div class="people-heading">顯示</div>
       <label class="setting-row">
-        <span class="setting-label">字體大小<br><span class="setting-hint">調大一點,眼睛不那麼累</span></span>
+        <span class="setting-label">字體大小<br><span class="setting-hint">調大一點，眼睛不那麼累</span></span>
         <select id="selFontScale" class="theme-select">
           ${[['small', '小'], ['normal', '標準'], ['large', '大'], ['xlarge', '特大']]
             .map(([v, l]) => `<option value="${v}" ${(state.settings.fontScale || 'normal') === v ? 'selected' : ''}>${l}</option>`).join('')}
@@ -2477,13 +2481,13 @@ function renderSettings() {
       </label>
 
       <div class="people-heading">提示詞</div>
-      <label class="field" style="padding:0 2px">全域提示詞(所有對話與模式都套用,位於 prompt 最開頭)
-        <textarea id="globalPromptBox" rows="3" maxlength="2000" data-counter placeholder="例如:所有角色使用台灣用語;禁止替玩家角色代言或決定其行動">${esc(state.settings.globalPrompt || '')}</textarea>
+      <label class="field" style="padding:0 2px">全域提示詞(所有對話與模式都套用，位於 prompt 最開頭)
+        <textarea id="globalPromptBox" rows="3" maxlength="2000" data-counter placeholder="例如：所有角色使用台灣用語；禁止替玩家角色代言或決定其行動">${esc(state.settings.globalPrompt || '')}</textarea>
         <span class="char-count"></span>
       </label>
       <div class="form-actions"><button class="ghost-btn slim" id="btnSaveGlobalPrompt">儲存全域提示詞</button></div>
 
-      <div class="field-label">風格模組(勾選即生效於所有對話;想漫才就開、不想就關)</div>
+      <div class="field-label">風格模組(勾選即生效於所有對話；想漫才就開、不想就關)</div>
       ${state.settings.styleModules.map((m) => `
         <div class="preset-row">
           <input type="checkbox" data-sm-toggle="${esc(m.id)}" ${m.enabled ? 'checked' : ''} aria-label="啟用 ${esc(m.name)}">
@@ -2493,12 +2497,12 @@ function renderSettings() {
         </div>`).join('')}
       <div class="form-actions"><button class="ghost-btn slim" id="btnNewStyleModule">＋ 新增風格模組</button></div>
 
-      <label class="field" style="padding:0 2px">快速回覆按鈕(每行一個;顯示在對話輸入框上方,點了直接送出)
+      <label class="field" style="padding:0 2px">快速回覆按鈕(每行一個；顯示在對話輸入框上方，點了直接送出)
         <textarea id="quickRepliesBox" rows="2" maxlength="500">${esc((state.settings.quickReplies || []).join('\n'))}</textarea>
       </label>
       <div class="form-actions"><button class="ghost-btn slim" id="btnSaveQuickReplies">儲存快速回覆</button></div>
 
-      <div class="field-label">輸出替換規則(對所有 AI 輸出做「找→換」,例如把 *動作* 星號體換成(動作))</div>
+      <div class="field-label">輸出替換規則(對所有 AI 輸出做「找→換」，例如把 *動作* 星號體換成(動作))</div>
       ${state.settings.outputRules.map((r) => `
         <div class="preset-row">
           <input type="checkbox" data-or-toggle="${esc(r.id)}" ${r.enabled ? 'checked' : ''} aria-label="啟用規則">
@@ -2508,12 +2512,12 @@ function renderSettings() {
       <div class="form-actions"><button class="ghost-btn slim" id="btnNewOutputRule">＋ 新增規則</button></div>
 
       <div class="people-heading">正文</div>
-      <label class="field" style="padding:0 2px">格式指令(套用於所有正文場景;單一場景可用「備註」覆寫)
+      <label class="field" style="padding:0 2px">格式指令(套用於所有正文場景；單一場景可用「備註」覆寫)
         <textarea id="storyFormatBox" rows="3" maxlength="1000" data-counter>${esc(state.settings.storyFormat || '')}</textarea>
         <span class="char-count"></span>
       </label>
       <div class="form-actions"><button class="ghost-btn slim" id="btnSaveStoryFormat">儲存格式指令</button></div>
-      <div class="field-label" style="margin-top:8px">App 圖示包(每格丟一張方形圖即換皮;沒圖的維持預設字符)</div>
+      <div class="field-label" style="margin-top:8px">App 圖示包(每格丟一張方形圖即換皮；沒圖的維持預設字符)</div>
       <div class="icon-pack-grid">
         ${[...HOME_APPS, ...DOCK_APPS].map((app) => {
     const cur = state.settings.appIcons?.[app.id];
@@ -2539,19 +2543,19 @@ function renderSettings() {
         <input type="checkbox" id="chkMoodEmoji" ${state.settings.moodEmoji !== false ? 'checked' : ''}>
       </label>
       <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:6px">
-        <span class="setting-label">🐕 桌面寵物<br><span class="setting-hint">住在主畫面底部,會走來走去;點牠會講話。零 API 純裝飾。建議上傳去背 PNG(站/走/坐最多三張,只給一張全狀態共用)。</span></span>
+        <span class="setting-label">🐕 桌面寵物<br><span class="setting-hint">住在主畫面底部，會走來走去；點牠會講話。零 API 純裝飾。建議上傳去背 PNG(站/走/坐最多三張，只給一張全狀態共用)。</span></span>
         <label class="check-field"><input type="checkbox" id="chkPet" ${petSettings().enabled ? 'checked' : ''}> 啟用</label>
-        <input id="petName" maxlength="12" value="${esc(petSettings().name || '')}" placeholder="名字(例:豬皮)">
+        <input id="petName" maxlength="12" value="${esc(petSettings().name || '')}" placeholder="名字(例：豬皮)">
         <div class="pk-type-row">
           <label class="ghost-btn slim">站姿圖<input type="file" id="petImgStand" accept="image/*" hidden></label>
           <label class="ghost-btn slim">走路圖<input type="file" id="petImgWalk" accept="image/*" hidden></label>
           <label class="ghost-btn slim">坐姿圖<input type="file" id="petImgSit" accept="image/*" hidden></label>
           <button class="ghost-btn slim" id="petImgClear">還原預設狗</button>
         </div>
-        <textarea id="petLines" rows="3" placeholder="台詞池,一行一句">${esc((petSettings().lines || []).join('\n'))}</textarea>
+        <textarea id="petLines" rows="3" placeholder="台詞池，一行一句">${esc((petSettings().lines || []).join('\n'))}</textarea>
       </div>
       <label class="setting-row">
-        <span class="setting-label">內建正文導演指令<br><span class="setting-hint">場景敘事自動帶導演配方:多人=反應分工不撞戲,單人=內外落差深描;含感官錨點、長度地板(英文注入省 token,輸出仍為繁中)</span></span>
+        <span class="setting-label">內建正文導演指令<br><span class="setting-hint">場景敘事自動帶導演配方：多人=反應分工不撞戲，單人=內外落差深描；含感官錨點、長度地板(英文注入省 token,輸出仍為繁中)</span></span>
         <input type="checkbox" id="chkStoryDirector" ${state.settings.storyDirector !== false ? 'checked' : ''}>
       </label>
       <label class="setting-row">
@@ -2559,27 +2563,27 @@ function renderSettings() {
         <input type="checkbox" id="chkChatFeel" ${state.settings.chatFeel !== false ? 'checked' : ''}>
       </label>
       <label class="setting-row">
-        <span class="setting-label">角色會傳語音訊息<br><span class="setting-hint">情緒濃的時刻,他自己決定改用「說的」(聲波條樣式,點了播放;僅支援語音的裝置)</span></span>
+        <span class="setting-label">角色會傳語音訊息<br><span class="setting-hint">情緒濃的時刻，他自己決定改用「說的」(聲波條樣式，點了播放；僅支援語音的裝置)</span></span>
         <input type="checkbox" id="chkVoiceTag" ${state.settings.voiceTag !== false ? 'checked' : ''}>
       </label>
       <label class="setting-row">
-        <span class="setting-label">正文行動選項<br><span class="setting-hint">說書人結尾給 2~3 個 ▷ 選項按鈕,可點可無視</span></span>
+        <span class="setting-label">正文行動選項<br><span class="setting-hint">說書人結尾給 2~3 個 ▷ 選項按鈕，可點可無視</span></span>
         <input type="checkbox" id="chkStoryChoices" ${state.settings.storyChoices !== false ? 'checked' : ''}>
       </label>
 
       <div class="people-heading">AI 連線(API / LLM)</div>
-      <div class="panel-note">金鑰只存在這台電腦的瀏覽器裡。目前對話仍使用本機假回覆;這裡先把連線設定準備好,串接時即可直接使用。</div>
+      <div class="panel-note">金鑰只存在這台電腦的瀏覽器裡。目前對話仍使用本機假回覆；這裡先把連線設定準備好，串接時即可直接使用。</div>
       ${apiSectionHtml()}
 
       <div class="people-heading">資料</div>
       <button class="ghost-btn slim" id="btnImportRoom">匯入聊天室備份</button>
       <input type="file" id="roomFile" accept=".json,application/json" hidden>
-      <div class="panel-note">所有資料只存在這台電腦的瀏覽器(IndexedDB)裡,不會傳到任何地方。建議定期匯出備份,避免清瀏覽器快取時遺失。<br><strong>備份不包含 API 金鑰;匯入到新裝置後請自行重新輸入。</strong></div>
+      <div class="panel-note">所有資料只存在這台電腦的瀏覽器(IndexedDB)裡，不會傳到任何地方。建議定期匯出備份，避免清瀏覽器快取時遺失。<br><strong>備份不包含 API 金鑰；匯入到新裝置後請自行重新輸入。</strong></div>
       ${(() => {
         const at = state.lastBackupAt;
         const days = at ? Math.floor((Date.now() - at) / 86400000) : null;
         if (at && days < 7) return `<div class="panel-note">上次備份:${days === 0 ? '今天' : `${days} 天前`} ✓</div>`;
-        return `<div class="backup-warn">⚠ ${at ? `已 ${days} 天沒備份` : '從未備份'}——iOS 有權在空間吃緊時清掉網站資料,備份是唯一保險。</div>`;
+        return `<div class="backup-warn">⚠ ${at ? `已 ${days} 天沒備份` : '從未備份'}——iOS 有權在空間吃緊時清掉網站資料，備份是唯一保險。</div>`;
       })()}
       <div class="form-actions">
         <button class="primary-btn slim" id="btnExport">匯出全域備份</button>
@@ -2611,8 +2615,8 @@ function renderSettings() {
     try {
       const parsed = parseRoomImport(await file.text());
       openConfirmModal({
-        title: `匯入「${parsed.room.title}」?`,
-        body: `${parsed.room.type === 'dm' ? '私訊' : parsed.room.type === 'group' ? '群聊' : '正文場景'},${parsed.participants.length} 位角色、${parsed.messages.length} 則訊息。將建立為新副本,不會覆蓋任何既有資料;同名角色${parsed.room.type === 'dm' ? '會另建「(匯入)」新角色' : '將直接沿用'}。`,
+        title: `匯入「${parsed.room.title}」？`,
+        body: `${parsed.room.type === 'dm' ? '私訊' : parsed.room.type === 'group' ? '群聊' : '正文場景'},${parsed.participants.length} 位角色、${parsed.messages.length} 則訊息。將建立為新副本，不會覆蓋任何既有資料；同名角色${parsed.room.type === 'dm' ? '會另建「(匯入)」新角色' : '將直接沿用'}。`,
         confirmLabel: '匯入',
         onConfirm: async () => {
           const { room } = await importRoom(parsed);
@@ -2653,7 +2657,7 @@ function renderSettings() {
     <h3>${mod ? '編輯' : '新增'}風格模組</h3>
     <form id="smForm">
       <label class="field">名稱
-        <input name="name" required maxlength="30" value="${esc(mod?.name || '')}" placeholder="例如:漫才模式">
+        <input name="name" required maxlength="30" value="${esc(mod?.name || '')}" placeholder="例如：漫才模式">
       </label>
       <label class="field">指令內容(啟用時注入所有對話的 prompt 開頭)
         <textarea name="content" rows="4" maxlength="2000" data-counter required>${esc(mod?.content || '')}</textarea>
@@ -2752,7 +2756,7 @@ function renderSettings() {
       await persist();
       renderPhone();
     } catch {
-      alert('圖片讀取失敗,換一張試試');
+      alert('圖片讀取失敗，換一張試試');
     }
   });
   els.phoneScreen.querySelectorAll('[data-icon-clear]').forEach((btn) => {
@@ -2828,7 +2832,7 @@ function renderSettings() {
     renderPhone();
   });
 
-  // 外觀:主題與背景圖
+  // 外觀：主題與背景圖
   els.phoneScreen.querySelector('#selTheme').addEventListener('change', async (e) => {
     state.settings.theme = e.target.value;
     await persist();
@@ -2854,7 +2858,7 @@ function renderSettings() {
     renderPhone();
   });
 
-  // 資料:全域備份匯出/匯入
+  // 資料：全域備份匯出/匯入
   els.phoneScreen.querySelector('#btnExport').addEventListener('click', () => {
     const blob = new Blob([exportStateJson()], { type: 'application/json' });
     const a = document.createElement('a');
@@ -2872,14 +2876,14 @@ function renderSettings() {
     const file = importFile.files[0];
     if (!file) return;
     openConfirmModal({
-      title: '匯入這份備份?',
+      title: '匯入這份備份？',
       body: '匯入會「完全覆蓋」目前裝置上的所有資料(角色、對話、社群、記憶、設定)。建議先匯出一份目前的備份再進行。',
       confirmLabel: '覆蓋匯入',
       onConfirm: async () => {
         try {
           const text = await file.text();
           await importStateJson(text);
-          location.reload(); // 重新啟動,乾淨載入匯入後的資料
+          location.reload(); // 重新啟動，乾淨載入匯入後的資料
         } catch (err) {
           alert(`匯入失敗:${err.message}(目前資料未被更動)`);
         }
@@ -2888,8 +2892,8 @@ function renderSettings() {
   });
   els.phoneScreen.querySelector('#btnClearAll').addEventListener('click', () => {
     openConfirmModal({
-      title: '清空這支手機?',
-      body: '所有角色、聊天紀錄、社群貼文、記憶與設定都會被刪除,畫面會回到最初的樣子。這個動作無法復原。',
+      title: '清空這支手機？',
+      body: '所有角色、聊天紀錄、社群貼文、記憶與設定都會被刪除，畫面會回到最初的樣子。這個動作無法復原。',
       confirmLabel: '全部清除',
       onConfirm: async () => {
         await resetAll();
@@ -2902,7 +2906,7 @@ function renderSettings() {
   });
 }
 
-/* ---------------- 右側:管理輔助面板(預設收合) ---------------- */
+/* ---------------- 右側：管理輔助面板(預設收合) ---------------- */
 
 function renderPanel() {
   const tabs = [
@@ -2975,9 +2979,9 @@ function renderMemoryPanel() {
     }).join('');
 
   els.panelBody.innerHTML = `
-    <div class="panel-note">這裡是「總倉庫」:不管你現在開著哪個 App,它都列出全站所有記憶(依歸屬分組)。各對話自己的記憶,主要入口是該對話標題列的「記憶」抽屜。</div>
-    <div class="panel-note">在聊天訊息或社群貼文上按「記住」,就能把它變成一條可編輯的記憶。DM 的記憶只有該角色本人看得到。</div>
-    <div class="mem-heading">共享記憶(所有角色可見,含社群)</div>
+    <div class="panel-note">這裡是「總倉庫」：不管你現在開著哪個 App,它都列出全站所有記憶(依歸屬分組)。各對話自己的記憶，主要入口是該對話標題列的「記憶」抽屜。</div>
+    <div class="panel-note">在聊天訊息或社群貼文上按「記住」，就能把它變成一條可編輯的記憶。DM 的記憶只有該角色本人看得到。</div>
+    <div class="mem-heading">共享記憶(所有角色可見，含社群)</div>
     ${mem.shared.length
     ? `<details class="mem-group" data-mem-group="shared">
          <summary class="mem-subheading">全部共享記憶(${mem.shared.length})</summary>
@@ -3025,13 +3029,13 @@ function renderMemoryPanel() {
   }));
 }
 
-/** 開發資訊:資料概況與目前對話的 buildPrompt 預覽(未來 API 會收到什麼)。 */
+/** 開發資訊：資料概況與目前對話的 buildPrompt 預覽(未來 API 會收到什麼)。 */
 function renderDevPanel() {
   const state = getState();
   const room = state.currentRoomId ? getRoom(state.currentRoomId) : null;
   const chars = room ? getRoomCharacters(room) : [];
 
-  let promptPreview = '<div class="panel-empty small">開啟任一對話後,這裡會顯示「實際會送出」的 prompt 預覽(依房型使用對應建構器)。</div>';
+  let promptPreview = '<div class="panel-empty small">開啟任一對話後，這裡會顯示「實際會送出」的 prompt 預覽(依房型使用對應建構器)。</div>';
   if (room && chars[0]) {
     const p = room.type === 'group' ? buildGroupPrompt({ roomId: room.id })
       : room.type === 'peek' ? buildPeekPrompt({ roomId: room.id })
@@ -3041,9 +3045,9 @@ function renderDevPanel() {
   }
 
   els.panelBody.innerHTML = `
-    <div class="panel-note">這一欄是開發/管理輔助區,不屬於手機本體。</div>
+    <div class="panel-note">這一欄是開發/管理輔助區，不屬於手機本體。</div>
     <div class="mem-heading">目前版本:${esc(getConfig()?.version || '(未知)')}</div>
-    <div class="panel-note">回報問題時附上這個版本號;若跟最新交付不符=瀏覽器吃到舊快取,請強制重新整理(或 PWA 移除重加)。</div>
+    <div class="panel-note">回報問題時附上這個版本號；若跟最新交付不符=瀏覽器吃到舊快取，請強制重新整理(或 PWA 移除重加)。</div>
     <div class="mem-heading">資料診斷(暫時性)</div>
     <div class="dev-stats">
       database:${esc(diagnostics.dbName)}<br>
@@ -3091,6 +3095,9 @@ function characterFormFields(c = {}) {
     <label class="field">名稱
       <input name="name" required value="${esc(c.name || '')}" placeholder="角色的名字">
     </label>
+    <label class="field">備註標籤(只有你看得到，用來區分同角色的不同世界觀；絕不會進入提示詞)
+      <input name="label" maxlength="30" value="${esc(c.label || '')}" placeholder="例如：家教線、民國線、同居哥哥線">
+    </label>
     <label class="field">描述(角色設定)
       <textarea name="description" rows="3" maxlength="8000" data-counter placeholder="角色背景、行為、語氣與互動方式">${esc(c.description || '')}</textarea>
       <span class="char-count"></span>
@@ -3104,18 +3111,18 @@ function characterFormFields(c = {}) {
       <span class="char-count"></span>
     </label>
     <label class="field">系統提示(systemPrompt)
-      <textarea name="systemPrompt" rows="3" maxlength="8000" data-counter placeholder="給真實 AI 的角色指令:語氣、個性、回覆風格">${esc(c.systemPrompt || '')}</textarea>
+      <textarea name="systemPrompt" rows="3" maxlength="8000" data-counter placeholder="給真實 AI 的角色指令：語氣、個性、回覆風格">${esc(c.systemPrompt || '')}</textarea>
       <span class="char-count"></span>
     </label>
     <label class="field">第一則訊息
-      <textarea name="firstMessage" rows="2" maxlength="2000" data-counter placeholder="第一次打開私訊時,角色說的話">${esc(c.firstMessage || '')}</textarea>
+      <textarea name="firstMessage" rows="2" maxlength="2000" data-counter placeholder="第一次打開私訊時，角色說的話">${esc(c.firstMessage || '')}</textarea>
       <span class="char-count"></span>
     </label>
-    <label class="field">備用開場白(每行一句;開新私訊時與第一則訊息隨機挑一)
+    <label class="field">備用開場白(每行一句；開新私訊時與第一則訊息隨機挑一)
       <textarea name="alternateGreetings" rows="2" maxlength="4000" data-counter>${esc((c.alternateGreetings || []).join('\n'))}</textarea>
       <span class="char-count"></span>
     </label>
-    <label class="field">Emoji 習慣(留空=看模型心情;例:「幾乎不用,用了代表事情大條」「愛用 😂 和 ~」)
+    <label class="field">Emoji 習慣(留空=看模型心情；例：「幾乎不用，用了代表事情大條」「愛用 😂 和 ~」)
       <input name="emojiStyle" maxlength="100" value="${esc(c.emojiStyle || '')}">
     </label>
     ${ttsAvailable() ? `
@@ -3133,11 +3140,11 @@ function characterFormFields(c = {}) {
     </div>` : ''}
     <label class="check-field">
       <input type="checkbox" name="noPhone" ${c.noPhone ? 'checked' : ''}>
-      非現代世界角色(不使用手機:不發社群、不留言、不主動傳訊、對話中不看社群動態;日記與正文照常)
+      非現代世界角色(不使用手機：不發社群、不留言、不主動傳訊、對話中不看社群動態；日記與正文照常)
     </label>
     <label class="field">主動程度(他多常主動傳訊給你)
       <select name="proactivity" class="theme-select" style="width:100%; margin-top:5px">
-        ${[['off', '不主動(絕不主動傳訊)'], ['low', '低(高冷,偶爾才想到你)'], ['mid', '中(普通朋友的頻率)'], ['high', '高(黏人,常常想找你)']]
+        ${[['off', '不主動(絕不主動傳訊)'], ['low', '低(高冷，偶爾才想到你)'], ['mid', '中(普通朋友的頻率)'], ['high', '高(黏人，常常想找你)']]
           .map(([v, l]) => `<option value="${v}" ${(c.proactivity || 'mid') === v ? 'selected' : ''}>${l}</option>`).join('')}
       </select>
     </label>
@@ -3199,9 +3206,9 @@ function openCharacterModal({ openDmAfter = false, stayInPeople = false } = {}) 
         getState().currentCharacterId = character.id;
         closeModal();
         if (openDmAfter) {
-          await openRoom(dmRoom.id);   // 從聊天 App 進來:直接開私訊
+          await openRoom(dmRoom.id);   // 從聊天 App 進來：直接開私訊
         } else if (stayInPeople) {
-          await navigate('people');    // 從角色 App 進來:留在列表看到新角色
+          await navigate('people');    // 從角色 App 進來：留在列表看到新角色
         }
         await persist();
         renderAll();
@@ -3239,7 +3246,7 @@ function openGroupModal() {
     <h3>建立聊天室</h3>
     <form id="groupForm">
       <label class="field">聊天室名稱
-        <input name="title" required placeholder="例如:深夜留言板">
+        <input name="title" required placeholder="例如：深夜留言板">
       </label>
       <div class="field-label">選擇角色(至少 2 位)</div>
       <div class="check-list">${characterChecklist('members')}</div>
@@ -3286,7 +3293,7 @@ function openStoryModal() {
     <h3>建立正文場景</h3>
     <form id="storyForm">
       <label class="field">場景名稱
-        <input name="title" required placeholder="例如:末班車之後">
+        <input name="title" required placeholder="例如：末班車之後">
       </label>
       <div class="field-label">在場角色(至少 1 位)</div>
       <div class="check-list">${characterChecklist('members')}</div>
@@ -3328,13 +3335,13 @@ function openPersonaModal(persona = null) {
         </div>
       </div>
       <label class="field">名字
-        <input name="name" required maxlength="40" value="${esc(persona?.name || '')}" placeholder="這個「你」叫什麼?">
+        <input name="name" required maxlength="40" value="${esc(persona?.name || '')}" placeholder="這個「你」叫什麼？">
       </label>
-      <label class="field">備註標籤(只顯示在你的選單,角色不會讀到——同名人設靠這個分)
-        <input name="label" maxlength="30" value="${esc(persona?.label || '')}" placeholder="例:民國線、現代大學線">
+      <label class="field">備註標籤(只顯示在你的選單，角色不會讀到——同名人設靠這個分)
+        <input name="label" maxlength="30" value="${esc(persona?.label || '')}" placeholder="例：民國線、現代大學線">
       </label>
       <label class="field">描述(角色眼中的你)
-        <textarea name="description" rows="4" maxlength="4000" data-counter placeholder="例如:19 歲大學生,短髮,講話直接">${esc(persona?.description || '')}</textarea>
+        <textarea name="description" rows="4" maxlength="4000" data-counter placeholder="例如:19 歲大學生，短髮，講話直接">${esc(persona?.description || '')}</textarea>
         <span class="char-count"></span>
       </label>
       <div class="form-actions">
@@ -3369,8 +3376,8 @@ function openPersonaModal(persona = null) {
       if (del) {
         del.addEventListener('click', () => {
           openConfirmModal({
-            title: `刪除人設「${persona.name}」?`,
-            body: '綁定這個人設的角色、對話與貼文會全部改指向預設人設,內容不會被刪除。這個動作無法復原。',
+            title: `刪除人設「${persona.name}」？`,
+            body: '綁定這個人設的角色、對話與貼文會全部改指向預設人設，內容不會被刪除。這個動作無法復原。',
             confirmLabel: '刪除',
             onConfirm: async () => {
               try { await deletePersona(persona.id); } catch (err) { alert(err.message); }
@@ -3422,7 +3429,7 @@ function openPersonaSelectModal({ title, current, onSelect }) {
 function openNewPostModal() {
   openModal(`
     <h3>發貼文</h3>
-    <p class="panel-note">貼文是公開的:所有角色都看得到,也可能來留言(附圖時角色也看得到圖)。</p>
+    <p class="panel-note">貼文是公開的：所有角色都看得到，也可能來留言(附圖時角色也看得到圖)。</p>
     <form id="postForm">
       <label class="field">用哪個身分發?
         <select name="personaId" class="theme-select" style="width:100%; margin-top:5px">
@@ -3430,7 +3437,7 @@ function openNewPostModal() {
         </select>
       </label>
       <label class="field">內容
-        <textarea name="content" rows="4" placeholder="想說點什麼?"></textarea>
+        <textarea name="content" rows="4" placeholder="想說點什麼？"></textarea>
       </label>
       <div class="field">附加圖片(自動壓縮)
         <div class="avatar-upload">
@@ -3509,7 +3516,7 @@ function openMemoryCandidateModal(message, roomId) {
 
   openModal(`
     <h3>記住這件事</h3>
-    <p class="panel-note">這是訊息原文的截取,不是自動摘要——儲存前可以改寫成你想讓角色記得的樣子。</p>
+    <p class="panel-note">這是訊息原文的截取，不是自動摘要——儲存前可以改寫成你想讓角色記得的樣子。</p>
     <label class="field">記憶內容
       <textarea id="memCandidate" rows="4">${esc(candidate.content)}</textarea>
     </label>
@@ -3528,13 +3535,13 @@ function openMemoryCandidateModal(message, roomId) {
   });
 }
 
-/** 房間記憶抽屜:這個對話「看得到」的記憶,可直接編輯/釘選/刪除/手動新增。 */
+/** 房間記憶抽屜：這個對話「看得到」的記憶，可直接編輯/釘選/刪除/手動新增。 */
 function openRoomMemoryModal(room) {
   const state = getState();
   const chars = getRoomCharacters(room);
   const dmChar = room.type === 'dm' ? chars[0] : null;
 
-  // 這個對話可見的記憶分組(每次重繪重算,新增的記憶即時出現)
+  // 這個對話可見的記憶分組(每次重繪重算，新增的記憶即時出現)
   const computeGroups = () => {
     const g2 = [];
     if (dmChar) {
@@ -3597,7 +3604,7 @@ function openRoomMemoryModal(room) {
     + `
     ${(getState().settings.styleModules || []).length ? `
       <div class="mem-heading">風格模組(僅本對話)</div>
-      <div class="panel-note">勾選狀態只影響這個對話;其他對話跟隨設定裡的全域開關。</div>
+      <div class="panel-note">勾選狀態只影響這個對話；其他對話跟隨設定裡的全域開關。</div>
       ${getState().settings.styleModules.map((sm) => {
     const ov = room.styleOverrides?.[sm.id];
     const eff = ov === undefined ? sm.enabled : ov;
@@ -3611,7 +3618,7 @@ function openRoomMemoryModal(room) {
     ` : ''}
     ${room.type === 'story' ? `
       <div class="mem-heading">章節</div>
-      <div class="panel-note">封存=把本章摘要進場景記憶+清空對話重新開始;原文完整保留可回翻,說書人會記得前情。</div>
+      <div class="panel-note">封存=把本章摘要進場景記憶+清空對話重新開始；原文完整保留可回翻，說書人會記得前情。</div>
       ${(room.archivedChapters || []).map((ch) => `
         <button class="list-row" data-open-chapter="${ch.n}">
           <span class="list-main">
@@ -3627,7 +3634,7 @@ function openRoomMemoryModal(room) {
     <div class="mem-heading">Prompt 檢視</div>
     <button class="ghost-btn slim" id="rmInspect">🔍 檢視本次會送出的 prompt(含成本估算)</button>
     <div class="mem-heading">對話摘要(長期記憶)</div>
-    <div class="panel-note">把上次摘要之後的對話濃縮成幾條記憶,勾選後存入——舊劇情就不會因為超出上下文而蒸發。</div>
+    <div class="panel-note">把上次摘要之後的對話濃縮成幾條記憶，勾選後存入——舊劇情就不會因為超出上下文而蒸發。</div>
     <button class="ghost-btn slim" id="rmSummarize">✦ 摘要至今</button>
     <div id="rmSummaryArea"></div>
     <div class="mem-heading">手動新增記憶</div>
@@ -3641,7 +3648,7 @@ function openRoomMemoryModal(room) {
 
   openModal(`
     <h3>這個對話的記憶</h3>
-    <p class="panel-note">只列出「${esc(room.title)}」看得到的記憶,改完直接生效,下一次回覆就會用到。</p>
+    <p class="panel-note">只列出「${esc(room.title)}」看得到的記憶，改完直接生效，下一次回覆就會用到。</p>
     <div id="rmBody">${bodyHtml()}</div>`, {
     onOpen(root) {
       const body = root.querySelector('#rmBody');
@@ -3768,7 +3775,7 @@ function openRoomMemoryModal(room) {
   });
 }
 
-/** 分享貼文到聊天室:選一個 DM/群聊,附一句話送出。 */
+/** 分享貼文到聊天室：選一個 DM/群聊，附一句話送出。 */
 function openSharePostModal(post) {
   const state = getState();
   const rooms = state.rooms.filter((r) => r.type === 'dm' || r.type === 'group');
@@ -3789,7 +3796,7 @@ function openSharePostModal(post) {
       <div class="shared-post-body">${esc(excerpt)}</div>
     </div>
     <label class="field">附一句話(可留空)
-      <input id="shareMsg" maxlength="500" placeholder="例如:哥你這什麼意思啊">
+      <input id="shareMsg" maxlength="500" placeholder="例如：哥你這什麼意思啊">
     </label>
     <div class="field-label">傳到哪裡?</div>
     <div class="check-list">
@@ -3838,7 +3845,7 @@ function openPromptInspectModal(room) {
   const sysChars = built.system.length;
   const inTokens = Math.round((sysChars + histChars) * 1.5);   // 中文粗估 1 字 ≈ 1.5 token
   const outTokens = Math.round((built.meta?.maxReplyChars || 800) * 1.5);
-  // 參考價:Flash 級 $0.30/M 輸入、$2.50/M 輸出;台幣 ×32
+  // 參考價:Flash 級 $0.30/M 輸入、$2.50/M 輸出；台幣 ×32
   const inCost = (inTokens / 1e6) * 0.30 * 32;
   const outCost = (outTokens / 1e6) * 2.50 * 32;
 
@@ -3847,13 +3854,13 @@ function openPromptInspectModal(room) {
     <div class="panel-note">
       系統段 ${sysChars} 字 + 歷史 ${built.messages.length} 則(${histChars} 字)≈ <strong>${inTokens.toLocaleString()} tokens 輸入</strong><br>
       粗估成本(Flash 級參考價):輸入約 NT$${inCost.toFixed(2)},輸出滿上限(${built.meta?.maxReplyChars} 字)最多約 NT$${outCost.toFixed(2)}<br>
-      <span style="opacity:.7">估算僅供參考,實際依供應商計價;思考模式會另計。</span>
+      <span style="opacity:.7">估算僅供參考，實際依供應商計價；思考模式會另計。</span>
     </div>
-    <div class="field-label">系統段內容(世界書/記憶是否進場,一看便知):</div>
+    <div class="field-label">系統段內容(世界書/記憶是否進場，一看便知):</div>
     <pre class="prompt-inspect">${esc(built.system)}</pre>`);
 }
 
-/** 場景/群聊成員管理:中途加入或移出角色,可附登場/退場敘述。 */
+/** 場景/群聊成員管理：中途加入或移出角色，可附登場/退場敘述。 */
 function openRoomMembersModal(room) {
   const state = getState();
   const inIds = room.participantIds.filter((id) => id !== 'player');
@@ -3915,7 +3922,7 @@ function openRoomMembersModal(room) {
   });
 }
 
-/* ---------------- v60. 角色手機 App(K 案收納頁:狀態/快照/日記一站看) ---------------- */
+/* ---------------- v60. 角色手機 App(K 案收納頁：狀態/快照/日記一站看) ---------------- */
 
 function renderCharPhoneList() {
   const state = getState();
@@ -3925,15 +3932,15 @@ function renderCharPhoneList() {
     <button class="list-row" data-cp-open="${esc(c.id)}">
       ${avatarHtml(c)}
       <span class="list-main">
-        <span class="list-title">${esc(c.name)}</span>
-        <span class="list-preview">${c.status?.text ? `♪ ${esc(firstLine(c.status.text, 22))}` : esc(firstLine(c.description || '', 22) || '…')}</span>
+        <span class="list-title">${esc(c.name)}${c.label?.trim() ? ` <span class="char-label">${esc(c.label.trim())}</span>` : ''}</span>
+        ${c.status?.text ? `<span class="list-preview">♪ ${esc(firstLine(c.status.text, 22))}</span>` : ''}
       </span>
       <span class="list-chevron" aria-hidden="true">›</span>
     </button>`).join('');
   els.phoneScreen.innerHTML = `
     ${appHeader('角色手機')}
     <div class="phone-list">
-      <div class="panel-note">選一個人,看看他的手機裡有什麼。他不會知道。</div>
+      <div class="panel-note">選一個人，看看他的手機裡有什麼。他不會知道。</div>
       ${rows || '<div class="list-empty small">還沒有(有手機的)角色。</div>'}
       ${hiddenCount ? `<div class="panel-note">另有 ${hiddenCount} 位沒有手機的角色未列出。</div>` : ''}
     </div>`;
@@ -3966,13 +3973,13 @@ function renderCharPhoneDetail() {
           <span>${esc(label)}</span>
           <button class="mini-btn" data-cp-gen="${esc(type)}">${latest ? '↻ 更新快照' : '👀 窺看'}</button>
         </div>
-        ${latest ? peekCardHtml(latest) : '<div class="cp-empty">尚未窺看。(一次一則生成,走次要模型)</div>'}
+        ${latest ? peekCardHtml(latest) : '<div class="cp-empty">尚未窺看。(一次一則生成，走次要模型)</div>'}
       </div>`;
   };
 
   els.phoneScreen.innerHTML = `
     ${appHeader(`${c.name} 的手機`, {
-      subtitle: c.status?.text ? `♪ ${firstLine(c.status.text, 20)}` : '螢幕沒鎖,你就看了',
+      subtitle: c.status?.text ? `♪ ${firstLine(c.status.text, 20)}` : '螢幕沒鎖，你就看了',
       leadingHtml: avatarHtml(c, 'sm'),
     })}
     <div class="phone-list cp-page">
@@ -4007,7 +4014,7 @@ function renderCharPhoneDetail() {
   }));
 }
 
-/** 提案 K:快照分型渲染(手機截圖風;全部過 esc)。 */
+/** 提案 K:快照分型渲染(手機截圖風；全部過 esc)。 */
 function peekCardHtml(entry) {
   const lines = String(entry.content || '').split('\n').map((l) => l.trim()).filter(Boolean);
   const when = new Date(entry.createdAt).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -4015,7 +4022,7 @@ function peekCardHtml(entry) {
   if (entry.type === 'draft') {
     body = lines.map((l) => {
       const parts = l.split('||').map((p) => p.trim());
-      // v60:三欄「收件人||草稿||原因」;舊二欄「草稿||原因」相容
+      // v60:三欄「收件人||草稿||原因」；舊二欄「草稿||原因」相容
       const [to, draft, note] = parts.length >= 3 ? parts : [null, parts[0], parts[1]];
       return `<div class="pk-draft">${to ? `<div class="pk-draft-to">To:${esc(to)}</div>` : ''}<div class="pk-draft-bubble">${esc(draft || l)}</div>${note ? `<div class="pk-draft-note">${esc(note)}</div>` : ''}</div>`;
     }).join('');
@@ -4025,10 +4032,10 @@ function peekCardHtml(entry) {
       return `<div class="pk-song">♪ ${esc(l)}</div>`;
     }).join('');
   } else {
-    // v60:搜尋紀錄加程式端時間裝飾(確定性遞減,零鸚鵡風險)
+    // v60:搜尋紀錄加程式端時間裝飾(確定性遞減，零鸚鵡風險)
     let t = entry.createdAt;
     body = lines.map((l, i) => {
-      t -= (7 + ((i * 37) % 113)) * 60000; // 每條往回 7~119 分鐘,依序遞減
+      t -= (7 + ((i * 37) % 113)) * 60000; // 每條往回 7~119 分鐘，依序遞減
       const d = new Date(t);
       const sameDay = d.toDateString() === new Date(entry.createdAt).toDateString();
       const label = (sameDay ? '' : `${d.getMonth() + 1}/${d.getDate()} `)
@@ -4044,7 +4051,7 @@ export function openPhonePeekModal(character, freshEntry = null) {
   const history = phonePeeksFor(character.id);
   openModal(`
     <h3>👀 偷看${esc(character.name)}的手機</h3>
-    <div class="panel-note">選一種快照。他不會知道。(一次一則生成,走次要模型)</div>
+    <div class="panel-note">選一種快照。他不會知道。(一次一則生成，走次要模型)</div>
     <div class="pk-type-row">
       ${Object.entries(PEEK_TYPES).map(([k, v]) => `<button class="ghost-btn slim" data-pk-type="${k}">${v.label}</button>`).join('')}
     </div>
@@ -4069,7 +4076,7 @@ function openInnerVoicePicker(room, msg) {
   const chars = getRoomCharacters(room);
   openModal(`
     <h3>👁 窺探這一幕的心聲</h3>
-    <div class="panel-note">選一位角色,看他此刻沒說出口的部分。已生成的免費展開。</div>
+    <div class="panel-note">選一位角色，看他此刻沒說出口的部分。已生成的免費展開。</div>
     <div class="check-list">
       ${chars.map((c) => `<button class="ghost-btn slim iv-pick" data-iv-pick="${esc(c.id)}">${esc(c.name)}${msg.innerVoices?.[c.id] ? ' ✓' : ''}</button>`).join('')}
     </div>`, {
@@ -4157,13 +4164,13 @@ function openAuthorNoteModal(room) {
   const showStage = room.type === 'dm' || room.type === 'story';
   openModal(`
     <h3>作者備註</h3>
-    <p class="panel-note">只作用於「${esc(room.title)}」這個對話,會以最高優先指令注入 prompt 尾端。適合寫節奏、氛圍、尺度等導演指令,例如「維持慢節奏,不要讓劇情自己推進」。留空即停用。</p>
+    <p class="panel-note">只作用於「${esc(room.title)}」這個對話，會以最高優先指令注入 prompt 尾端。適合寫節奏、氛圍、尺度等導演指令，例如「維持慢節奏，不要讓劇情自己推進」。留空即停用。</p>
     <label class="field">備註內容
-      <textarea id="authorNoteBox" rows="5" maxlength="2000" data-counter placeholder="例如:子勳現在心情很差,但嘴上不承認">${esc(room.authorNote || '')}</textarea>
+      <textarea id="authorNoteBox" rows="5" maxlength="2000" data-counter placeholder="例如：子勳現在心情很差，但嘴上不承認">${esc(room.authorNote || '')}</textarea>
       <span class="char-count"></span>
     </label>
     ${showStage ? `
-    <label class="field">關係階段(選填;例:曖昧中、交往三個月、冷戰中——給模型一個「我們現在到哪了」的錨點)
+    <label class="field">關係階段(選填；例：曖昧中、交往三個月、冷戰中——給模型一個「我們現在到哪了」的錨點)
       <input id="relStageBox" maxlength="50" value="${esc(room.relationshipStage || '')}" placeholder="留空=不注入">
     </label>` : ''}
     <div class="form-actions">
@@ -4207,18 +4214,18 @@ function openEditMessageModal(roomId, msg) {
   });
 }
 
-/** 從社群貼文/留言建立「共享」記憶(社群是公開空間,只能進 shared)。 */
+/** 從社群貼文/留言建立「共享」記憶(社群是公開空間，只能進 shared)。 */
 function openSharedMemoryModal(text) {
   const raw = String(text || '').trim().replace(/\s+/g, ' ');
   const content = raw.length > 80 ? raw.slice(0, 80) + '…' : raw;
 
   openModal(`
     <h3>記住這件事</h3>
-    <p class="panel-note">這是社群內容的原文截取。社群屬於公開空間,這條記憶會存成「共享記憶」,所有角色可見。</p>
+    <p class="panel-note">這是社群內容的原文截取。社群屬於公開空間，這條記憶會存成「共享記憶」，所有角色可見。</p>
     <label class="field">記憶內容
       <textarea id="memCandidate" rows="4">${esc(content)}</textarea>
     </label>
-    <div class="field-label">可見範圍:共享記憶(所有角色可見)</div>
+    <div class="field-label">可見範圍：共享記憶(所有角色可見)</div>
     <div class="form-actions">
       <button class="primary-btn slim" id="memSave">存入記憶</button>
     </div>`, {

@@ -1,6 +1,6 @@
 /**
  * modules/diary.js
- * 角色日記:第一人稱、寫給自己看的私人筆記。
+ * 角色日記：第一人稱、寫給自己看的私人筆記。
  * 素材只用「這個角色自己知道的事」——他與玩家的 DM、他參與的群聊/正文、
  * 公開社群動態、共享記憶與他自己的私密記憶。其他角色的 DM 絕不進入。
  * 由角色頁的 ↻ 觸發生成(與發文/主動訊息同一套節流),絕不背景消耗 API。
@@ -36,7 +36,7 @@ export function diaryCooldownLeft() {
   return Math.max(0, Math.ceil(((state.diaryLastRefresh || 0) + cooldownMs - Date.now()) / 1000));
 }
 
-/** 這個角色「知道」的近期脈絡(自己的 DM + 參與的群聊/正文,各取尾段)。 */
+/** 這個角色「知道」的近期脈絡(自己的 DM + 參與的群聊/正文，各取尾段)。 */
 function knownContextOf(character) {
   const state = getState();
   const persona = getPersona(character.knownPersonaId) || defaultPersona();
@@ -69,14 +69,14 @@ export function buildDiaryPrompt(character, rng = Math.random) {
     .map((m) => `- ${m.pinned ? '(重要)' : ''}${m.content}`).join('\n') || '(無)';
   const shared = sharedMemoriesFor(character.knownPersonaId || state.defaultPersonaId).map((m) => `- ${m.content}`).join('\n') || '(無)';
 
-  const lore = matchEntries({ characterId: character.id, recentText: context });
+  const lore = matchEntries({ characterId: character.id, recentText: context, presentNames: [character.name] });
   const loreText = lore.length
     ? lore.map((e) => `- ${e.content}`).join('\n')
     : '(無)';
 
   const system = [
     ...globalPromptSection(),
-    `你是「${character.name}」,正在寫只給自己看的日記。`,
+    `你是「${character.name}」，正在寫只給自己看的日記。`,
     `【你的資料】${character.description || '(無)'};個性:${character.personality || '(未提供)'}${character.scenario ? `;情境:${character.scenario}` : ''}`,
     `【你最近經歷的對話】\n${context}`,
     `【最近的社群動態】\n${posts}`,
@@ -84,14 +84,14 @@ export function buildDiaryPrompt(character, rng = Math.random) {
     ...(albumTextFor(character.id) ? [`【相簿裡的回憶】\n${albumTextFor(character.id)}`] : []),
     `【大家都知道的事】\n${shared}`,
     `【世界觀】\n${loreText}`,
-    `【寫作指令】第一人稱,寫給自己看——可以坦白你對「${persona?.name || '那個人'}」的真實想法,包括嘴上不會說的。`
-      + `口吻要像私下的你,不是對外的你。只輸出日記內容本身,不要日期、不要名字前綴、不要引號包裹。`
+    `【寫作指令】第一人稱，寫給自己看——可以坦白你對「${persona?.name || '那個人'}」的真實想法，包括嘴上不會說的。`
+      + `口吻要像私下的你，不是對外的你。只輸出日記內容本身，不要日期、不要名字前綴、不要引號包裹。`
       + rollLengthDirective('diary', rng),
   ].join('\n\n');
 
   return {
     system,
-    messages: [{ role: 'user', content: '(夜深了,你翻開日記。)' }],
+    messages: [{ role: 'user', content: '(夜深了，你翻開日記。)' }],
     meta: { maxReplyChars: 600, roomType: 'diary' },
   };
 }
@@ -123,12 +123,12 @@ export async function generateDiary(characterId, opts = {}) {
     const seed = hashStr(character.id) + Math.floor(Date.now() / 60000);
     content = pick([
       '今天很吵。但不討厭。',
-      `${sceneOf(character) ? `${sceneOf(character)}。` : ''}想早點睡,結果又想東想西。`,
+      `${sceneOf(character) ? `${sceneOf(character)}。` : ''}想早點睡，結果又想東想西。`,
       `寫下來就好一點。${traitOf(character) ? `${traitOf(character)}的人也是會累的。` : ''}`.trim(),
-      '沒什麼特別的一天。硬要說的話,有一句話一直留在腦子裡。',
+      '沒什麼特別的一天。硬要說的話，有一句話一直留在腦子裡。',
     ], seed);
   }
-  if (!content) return { ok: false, message: '這次沒寫出東西,再試一次' };
+  if (!content) return { ok: false, message: '這次沒寫出東西，再試一次' };
 
   const entry = { id: genId('dia'), content, createdAt: Date.now() };
   getDiaries(characterId).unshift(entry);

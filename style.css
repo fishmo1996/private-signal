@@ -1848,6 +1848,10 @@ body.theme-dusk .iv-log-item { background: rgba(255,255,255,.05); }
 /* 角色狀態(提案 M):名字下的小字簽名 */
 .char-status { display: block; font-size: 11px; color: var(--ink-faint); font-style: italic; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
 
+/* v61:角色備註標籤(只給玩家看的世界觀區分小膠囊,絕不進 prompt) */
+.char-label { display: inline-block; font-size: 10px; font-weight: 400; color: var(--ink-faint); background: rgba(128,128,128,.12); border-radius: 8px; padding: 1px 7px; margin-left: 4px; vertical-align: 1px; white-space: nowrap; }
+body.theme-dusk .char-label { background: rgba(255,255,255,.09); }
+
 /* 偷看手機(提案 K):手機截圖風卡片 */
 .pk-type-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
 .peek-card { border: 1px solid rgba(128,128,128,.22); border-radius: 12px; padding: 10px 12px; margin-top: 8px; background: rgba(255,255,255,.3); }
