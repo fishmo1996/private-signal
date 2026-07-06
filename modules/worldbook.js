@@ -218,8 +218,9 @@ export function parseWorldbookImport(jsonText) {
     throw new Error('不是有效的 JSON 檔');
   }
 
-  // 本站格式
-  if (parsed.format === 'private-signal-worldbook' && Array.isArray(parsed.worldbooks)) {
+  // 本站格式(新:private-signal-worldbook + worldbooks[];舊:maliphone-lorebook + lorebook{})
+  const isOwnFormat = parsed.format === 'private-signal-worldbook' || parsed.format === 'maliphone-lorebook';
+  if (isOwnFormat && Array.isArray(parsed.worldbooks)) {
     const books = parsed.worldbooks.map((b) => ({
       name: b.name || '匯入的世界書',
       enabled: b.enabled !== false,
@@ -227,6 +228,14 @@ export function parseWorldbookImport(jsonText) {
     }));
     if (!books.length) throw new Error('備份檔裡沒有世界書');
     return books;
+  }
+  // 舊版單本格式:{ lorebook: { name, entries[] } }
+  if (isOwnFormat && parsed.lorebook && Array.isArray(parsed.lorebook.entries)) {
+    return [{
+      name: parsed.lorebook.name || '匯入的世界書',
+      enabled: parsed.lorebook.enabled !== false,
+      entries: parsed.lorebook.entries.map(normalizeImportEntry).filter((e) => e.content),
+    }];
   }
 
   // ST/Risu 格式:{ entries: {0:{...},1:{...}} } 或 { entries: [...] }
