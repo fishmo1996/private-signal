@@ -33,6 +33,7 @@ export const HOME_APPS = [
   { id: 'album',    label: '相簿',   view: 'album',      glyph: '✧', tone: 'b' },
   { id: 'player',   label: '玩家',   view: 'player',     glyph: '✿', tone: 'g' },
   { id: 'worldbook', label: '世界書', view: 'worldbook',  glyph: '▤', tone: 'f' },
+  { id: 'charphone', label: '角色手機', view: 'char-phone', glyph: '▣', tone: 'd' },
 ];
 
 /** 底部 dock:最常用的四顆常駐。 */

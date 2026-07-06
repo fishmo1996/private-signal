@@ -27,7 +27,7 @@ const sc=await createStory('s',[a.id]); const g=await createGroup('g',[a.id,b.id
 await saveApiConfig({useRealApi:true,provider:'gemini',apiKey:'K',model:'m'});
 const mock=(text)=>{ globalThis.fetch=async()=>({ok:true,json:async()=>({candidates:[{content:{parts:[{text}]}}]})}); };
 initNavigation(); ui.initUI({appName:'私人訊號'});
-for(const v of ['home','chat-friends','chat-rooms','chat-peek','social-feed','story-list','people','player','worldbook','settings','album','search']){
+for(const v of ['home','chat-friends','chat-rooms','chat-peek','social-feed','story-list','people','player','worldbook','settings','album','search','char-phone']){
   try{ await navigate(v); ui.renderAll(); t(true,v);}catch(e){ t(false,`${v}: ${e.message}`);} }
 for(const r of [dm.id,sc.id,g.id,pk.id]){ try{ await openRoom(r); ui.renderAll(); t(true,'room');}catch(e){ t(false,'room '+e.message);} }
 await openRoom(sc.id); ui.renderAll();

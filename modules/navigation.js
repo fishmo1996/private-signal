@@ -79,6 +79,8 @@ export function parentView() {
     case 'worldbook-detail': return 'worldbook';
     case 'character-diary': return 'people-character';
     case 'search': return 'chat-friends';
+    case 'char-phone-detail': return 'char-phone'; // v60 角色手機
+    case 'char-phone':
     case 'chat-friends':
     case 'chat-rooms':
     case 'chat-peek':

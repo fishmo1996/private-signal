@@ -262,6 +262,8 @@ function renderPhone() {
     case 'search': renderSearch(); break;
     case 'people-character': renderCharacterDetail(); break;
     case 'character-diary': renderCharacterDiary(); break;
+    case 'char-phone': renderCharPhoneList(); break;
+    case 'char-phone-detail': renderCharPhoneDetail(); break;
     case 'settings': renderSettings(); break;
     case 'worldbook': renderWorldbookList(); break;
     case 'worldbook-detail': renderWorldbookDetail(); break;
@@ -546,7 +548,8 @@ function renderRoomView() {
   const chars = getRoomCharacters(room);
   const isStory = room.type === 'story';
   const statusText = room.type === 'dm'
-    ? (chars[0]?.scenario ? firstLine(chars[0].scenario, 20) : '在線上')
+    ? (chars[0]?.status?.text ? `♪ ${firstLine(chars[0].status.text, 20)}` // v60:角色狀態掛進房內副標
+      : chars[0]?.scenario ? firstLine(chars[0].scenario, 20) : '在線上')
     : room.type === 'group'
       ? `${chars.length} 位角色`
       : `場景 · ${chars.map((c) => c.name).join('、') || '無人在場'}`;
@@ -741,6 +744,7 @@ function renderRoomView() {
     pendingImage = null;
     attachPreview.hidden = true;
     input.value = '';
+    input.style.height = 'auto'; // v60:清空後高度歸位
     sendBtn.disabled = true;
     await sendUserMessage(room.id, text, (info) => {
       typingBy = info.typingBy || '';
@@ -767,6 +771,16 @@ function renderRoomView() {
       doSend();
     }
   });
+  // v60:多行輸入自動長高(封頂約五行=120px,超過改為內部捲動)
+  if (input) {
+    const autoGrow = () => {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+    };
+    input.addEventListener('input', autoGrow);
+    input.dataset.autogrow = '1';
+    autoGrow();
+  }
   if (input) input.focus();
 
   renderMessages();
@@ -3901,6 +3915,98 @@ function openRoomMembersModal(room) {
   });
 }
 
+/* ---------------- v60. 角色手機 App(K 案收納頁:狀態/快照/日記一站看) ---------------- */
+
+function renderCharPhoneList() {
+  const state = getState();
+  const chars = state.characters.filter((c) => !c.noPhone);
+  const hiddenCount = state.characters.length - chars.length;
+  const rows = chars.map((c) => `
+    <button class="list-row" data-cp-open="${esc(c.id)}">
+      ${avatarHtml(c)}
+      <span class="list-main">
+        <span class="list-title">${esc(c.name)}</span>
+        <span class="list-preview">${c.status?.text ? `♪ ${esc(firstLine(c.status.text, 22))}` : esc(firstLine(c.description || '', 22) || '…')}</span>
+      </span>
+      <span class="list-chevron" aria-hidden="true">›</span>
+    </button>`).join('');
+  els.phoneScreen.innerHTML = `
+    ${appHeader('角色手機')}
+    <div class="phone-list">
+      <div class="panel-note">選一個人,看看他的手機裡有什麼。他不會知道。</div>
+      ${rows || '<div class="list-empty small">還沒有(有手機的)角色。</div>'}
+      ${hiddenCount ? `<div class="panel-note">另有 ${hiddenCount} 位沒有手機的角色未列出。</div>` : ''}
+    </div>`;
+  bindBack();
+  els.phoneScreen.querySelectorAll('[data-cp-open]').forEach((b) => b.addEventListener('click', async () => {
+    await navigate('char-phone-detail', { characterId: b.dataset.cpOpen });
+    renderPhone();
+  }));
+}
+
+function renderCharPhoneDetail() {
+  const state = getState();
+  const c = state.currentCharacterId ? getCharacter(state.currentCharacterId) : null;
+  if (!c || c.noPhone) { navigate('char-phone').then(renderAll); return; }
+
+  const peeks = phonePeeksFor(c.id);
+  const latestOf = (type) => peeks.find((p) => p.type === type) || null;
+  const diaries = getDiaries(c.id).slice(0, 2);
+  const fmtD = (ts) => {
+    const d = new Date(ts);
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  };
+
+  const sectionHtml = (type) => {
+    const latest = latestOf(type);
+    const label = PEEK_TYPES[type]?.label || type;
+    return `
+      <div class="cp-section">
+        <div class="cp-section-head">
+          <span>${esc(label)}</span>
+          <button class="mini-btn" data-cp-gen="${esc(type)}">${latest ? '↻ 更新快照' : '👀 窺看'}</button>
+        </div>
+        ${latest ? peekCardHtml(latest) : '<div class="cp-empty">尚未窺看。(一次一則生成,走次要模型)</div>'}
+      </div>`;
+  };
+
+  els.phoneScreen.innerHTML = `
+    ${appHeader(`${c.name} 的手機`, {
+      subtitle: c.status?.text ? `♪ ${firstLine(c.status.text, 20)}` : '螢幕沒鎖,你就看了',
+      leadingHtml: avatarHtml(c, 'sm'),
+    })}
+    <div class="phone-list cp-page">
+      ${c.status?.text ? `<div class="cp-status-card">狀態:${esc(c.status.text)}<span class="cp-status-time">${esc(fmtD(c.status.at || Date.now()))}</span></div>` : ''}
+      ${sectionHtml('playlist')}
+      ${sectionHtml('search')}
+      ${sectionHtml('draft')}
+      <div class="cp-section">
+        <div class="cp-section-head">
+          <span>日記</span>
+          <button class="mini-btn" id="cpOpenDiary">打開日記</button>
+        </div>
+        ${diaries.length
+          ? diaries.map((d) => `<div class="cp-diary-line">📔 ${esc(fmtD(d.createdAt))} ${esc(firstLine(d.content, 34))}</div>`).join('')
+          : '<div class="cp-empty">他最近沒寫日記。</div>'}
+      </div>
+      ${peeks.length ? `<details class="pk-history"><summary>歷史快照(${peeks.length})</summary>${peeks.map(peekCardHtml).join('')}</details>` : ''}
+    </div>`;
+
+  bindBack();
+  els.phoneScreen.querySelector('#cpOpenDiary')?.addEventListener('click', async () => {
+    await navigate('character-diary', { characterId: c.id });
+    renderPhone();
+  });
+  els.phoneScreen.querySelectorAll('[data-cp-gen]').forEach((b) => b.addEventListener('click', async () => {
+    b.disabled = true;
+    const orig = b.textContent;
+    b.textContent = '…窺看中';
+    const r = await generatePhonePeek(c.id, b.dataset.cpGen);
+    if (!r.ok) { alert(r.message); b.disabled = false; b.textContent = orig; return; }
+    renderPhone();
+  }));
+}
+
 /** 提案 K:快照分型渲染(手機截圖風;全部過 esc)。 */
 function peekCardHtml(entry) {
   const lines = String(entry.content || '').split('\n').map((l) => l.trim()).filter(Boolean);
@@ -3908,8 +4014,10 @@ function peekCardHtml(entry) {
   let body = '';
   if (entry.type === 'draft') {
     body = lines.map((l) => {
-      const [draft, note] = l.split('||');
-      return `<div class="pk-draft"><div class="pk-draft-bubble">${esc(draft || l)}</div>${note ? `<div class="pk-draft-note">${esc(note)}</div>` : ''}</div>`;
+      const parts = l.split('||').map((p) => p.trim());
+      // v60:三欄「收件人||草稿||原因」;舊二欄「草稿||原因」相容
+      const [to, draft, note] = parts.length >= 3 ? parts : [null, parts[0], parts[1]];
+      return `<div class="pk-draft">${to ? `<div class="pk-draft-to">To:${esc(to)}</div>` : ''}<div class="pk-draft-bubble">${esc(draft || l)}</div>${note ? `<div class="pk-draft-note">${esc(note)}</div>` : ''}</div>`;
     }).join('');
   } else if (entry.type === 'playlist') {
     body = lines.map((l) => {
@@ -3917,7 +4025,16 @@ function peekCardHtml(entry) {
       return `<div class="pk-song">♪ ${esc(l)}</div>`;
     }).join('');
   } else {
-    body = lines.map((l) => `<div class="pk-search">🔍 ${esc(l)}</div>`).join('');
+    // v60:搜尋紀錄加程式端時間裝飾(確定性遞減,零鸚鵡風險)
+    let t = entry.createdAt;
+    body = lines.map((l, i) => {
+      t -= (7 + ((i * 37) % 113)) * 60000; // 每條往回 7~119 分鐘,依序遞減
+      const d = new Date(t);
+      const sameDay = d.toDateString() === new Date(entry.createdAt).toDateString();
+      const label = (sameDay ? '' : `${d.getMonth() + 1}/${d.getDate()} `)
+        + `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      return `<div class="pk-search">🔍 ${esc(l)}<span class="pk-search-time">${esc(label)}</span></div>`;
+    }).join('');
   }
   return `<div class="peek-card"><div class="pk-head">${PEEK_TYPES[entry.type]?.label || entry.type} · ${esc(when)}</div>${body}</div>`;
 }
