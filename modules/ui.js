@@ -847,6 +847,7 @@ function renderMessages() {
         <div class="shared-post-head">${esc(m.sharedPost.authorName)} 的貼文</div>
         ${m.sharedPost.image ? `<img class="shared-post-img" src="${m.sharedPost.image}" alt="">` : ''}
         <div class="shared-post-body">${esc(m.sharedPost.excerpt)}</div>
+        ${(m.sharedPost.commentContext || []).map((cc) => `<div class="shared-cmt${cc.focus ? ' focus' : ''}"><b>${esc(cc.name)}</b>:${esc(cc.content)}</div>`).join('')}
       </div>` : '';
     if (m.role === 'user') {
       return `
@@ -1276,11 +1277,25 @@ function renderSocialPost() {
             const text = root.querySelector('#dmTopicMsg').value.trim();
             if (!text) return;
             closeModal();
+            // v73:帶留言脈絡——以被點的那則為中心,上 4 下 3(總上限 8),角色與玩家
+            // 兩邊都看得到這段私聊是從哪句留言接過來的,不再斷片。留言本就公開,無隱私疑慮。
+            const all = post.comments || [];
+            const ci = all.findIndex((x) => x.id === cm.id);
+            const slice = ci === -1 ? [] : all.slice(Math.max(0, ci - 4), Math.min(all.length, ci + 4));
+            const nameOf = (cc) => (cc.authorId === 'player'
+              ? (getPersona(cc.personaId)?.name || '我')
+              : (getCharacter(cc.authorId)?.name || '?'));
+            const commentContext = slice.slice(0, 8).map((cc) => ({
+              name: nameOf(cc),
+              content: cc.content.length > 80 ? `${cc.content.slice(0, 80)}…` : cc.content,
+              focus: cc.id === cm.id,
+            }));
             const sharedPost = {
               postId: post.id,
               authorName: who,
               excerpt: post.content.length > 60 ? `${post.content.slice(0, 60)}…` : post.content,
               image: post.image || null,
+              ...(commentContext.length ? { commentContext } : {}),
             };
             await openRoom(dmRoom.id);
             renderAll();

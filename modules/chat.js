@@ -74,7 +74,7 @@ function appendMessage(roomId, { role, senderId, content, image = null, sharedPo
     senderId,
     content,
     ...(image ? { image } : {}),
-    ...(sharedPost ? { sharedPost } : {}),   // {postId, authorName, excerpt, image}:引用的貼文卡
+    ...(sharedPost ? { sharedPost } : {}),   // {postId, authorName, excerpt, image, commentContext?}:引用的貼文卡(v73:私下聊帶留言脈絡,上4下3中心1總8)
     ...(choices && choices.length ? { choices } : {}), // 正文行動選項(僅最後一則顯示)
     ...(voice ? { voice: true } : {}),                 // 語音訊息(以聲波樣式呈現，點播用 TTS 唸)
     ...(missedCall ? { missedCall: true } : {}),       // 未接來電留言(提案 D):程式端設定，不靠模型標記

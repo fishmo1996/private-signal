@@ -34,9 +34,12 @@ export function sanitizeSearchSnapshot(text) {
     if (/妳/.test(l)) return false;                   // 第二人稱=對玩家說話,不是搜尋
     if (/[!?!?~]/.test(l) && l.length > 24) return false; // 帶語氣的長句
     if (l.length > 40) return false;                  // 真人搜尋詞不會這麼長
+    if (/輸出|^請|快照|搜尋紀錄/.test(l)) return false; // v74:模型複述任務指令(「請輸出你的搜尋紀錄」echo)
     return true;
   });
-  return kept.length ? kept.join('\n') : String(text || '').trim();
+  // v74:全部被攔=整包都是髒的,回空讓呼叫端報「重按一次」——舊 fallback 把髒原文
+  // 原樣放行(「全髒=全放」),擁有者親眼看到「---」與指令複述兩條並排展出。
+  return kept.join('\n');
 }
 
 /**
@@ -89,6 +92,9 @@ export async function generatePhonePeek(characterId, peekType) {
       content = stripNamePrefix(r.text, [character.name]).trim();
       if (peekType === 'search') content = sanitizeSearchSnapshot(content); // v61 輸出端防線
       if (peekType === 'draft') content = sanitizeDraftSnapshot(content); // v68:草稿去 --- 與 HTML
+      if (!String(content || '').trim()) {
+        return { ok: false, message: '這次生成的內容整包不合格式,已幫你攔下——再按一次「更新快照」通常就正常。' };
+      }
       if (!content) return { ok: false, message: '這一則被模型服務暫時擋下了(常見於敏感詞誤判)。再按一次「更新快照」通常就正常——這不是你的問題。' };
     } else {
       content = MOCK[peekType];
