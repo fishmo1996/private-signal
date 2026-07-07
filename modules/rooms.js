@@ -30,7 +30,8 @@ export async function createCharacter(data) {
     avatarImage: data.avatarImage || null,   // 壓縮後的 dataURL 頭像
     knownPersonaId: data.knownPersonaId || state.defaultPersonaId || null, // 他認識的那個「你」
     proactivity: data.proactivity || 'mid', // 主動程度:off 不主動 | low | mid | high
-    noPhone: !!data.noPhone,               // 非現代世界角色：不發社群/不主動傳訊/不看動態
+    noPhone: !!data.noPhone,
+    socialMute: !!data.socialMute,     // v65:不參與社群自動留言(他還是能發文/進正文,只是不來你貼文下互動)               // 非現代世界角色：不發社群/不主動傳訊/不看動態
     emojiStyle: data.emojiStyle || '',     // emoji 習慣(自由文字，如「只用🐟,像個大叔」)
     relationships: data.relationships || {}, // 與其他角色的關係:{對方id: 描述}(群聊/正文雙方在場時注入)
     themeColor: data.themeColor || '#8ea7ff',

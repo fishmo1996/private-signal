@@ -1204,7 +1204,7 @@ function renderSocialPost() {
     })}
     <div class="phone-list feed detail" id="postDetail">
       ${postCardHtml(post, { clickable: false })}
-      <div class="comment-heading">留言 ${comments.length ? `(${comments.length})` : ''}</div>
+      <div class="comment-heading">留言 ${comments.length ? `(${comments.length})` : ''} <button class="mini-btn" id="btnBanter" title="讓他們自己在這篇底下聊起來">↻ 他們的留言</button></div>
       ${commentHtml || '<div class="list-empty small">還沒有留言。</div>'}
       ${typing}
       ${errorBanner}
@@ -1216,6 +1216,13 @@ function renderSocialPost() {
 
   bindBack();
   bindFeedEvents(els.phoneScreen);
+
+  els.phoneScreen.querySelector('#btnBanter')?.addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    await runMockSocialReplies(post, null, null, null, null, true); // v65 banter:讓圈內角色自己留言互動
+    const b = els.phoneScreen.querySelector('#btnBanter');
+    if (b) b.disabled = false;
+  });
 
   els.phoneScreen.querySelector('#btnDeletePost').addEventListener('click', () => {
     openConfirmModal({
@@ -1361,8 +1368,8 @@ function renderSocialPost() {
  * 玩家發文/留言後，依 mock 機制產生角色留言(1 位主回覆 + 0~2 位補充)。
  * 僅使用公開資訊(角色公開設定、貼文內容、共享記憶)。
  */
-async function runMockSocialReplies(post, triggerText, triggerPersonaId = null, replyToName = null, threadReplyTo = null) {
-  const result = await generateSocialReplies({ post, triggerText, triggerPersonaId, replyToName });
+async function runMockSocialReplies(post, triggerText, triggerPersonaId = null, replyToName = null, threadReplyTo = null, banter = false) {
+  const result = await generateSocialReplies({ post, triggerText, triggerPersonaId, replyToName, banter });
   if (!result.ok) {
     socialError = `AI 留言失敗:${result.message}。你的內容已保留。`;
     if (getView() === 'social-post') renderSocialPost();
@@ -1766,6 +1773,7 @@ function renderCharacterDetail() {
     e.preventDefault();
     const data = readForm(e.target);
     data.noPhone = data.noPhone === 'on';
+        data.socialMute = data.socialMute === 'on';
     data.alternateGreetings = String(data.alternateGreetings || '').split('\n').map((g) => g.trim()).filter(Boolean);
     const relationships = {};
     for (const [k, v] of Object.entries(data)) {
@@ -3142,6 +3150,10 @@ function characterFormFields(c = {}) {
       <input type="checkbox" name="noPhone" ${c.noPhone ? 'checked' : ''}>
       非現代世界角色(不使用手機：不發社群、不留言、不主動傳訊、對話中不看社群動態；日記與正文照常)
     </label>
+    <label class="check-field">
+      <input type="checkbox" name="socialMute" ${c.socialMute ? 'checked' : ''}>
+      🔇 不參與社群自動留言(不會在你的貼文下出現;自己發文、群聊、正文照常。適合不想攻略的圈內角色)
+    </label>
     <label class="field">主動程度(他多常主動傳訊給你)
       <select name="proactivity" class="theme-select" style="width:100%; margin-top:5px">
         ${[['off', '不主動(絕不主動傳訊)'], ['low', '低(高冷，偶爾才想到你)'], ['mid', '中(普通朋友的頻率)'], ['high', '高(黏人，常常想找你)']]
@@ -3199,6 +3211,7 @@ function openCharacterModal({ openDmAfter = false, stayInPeople = false } = {}) 
         const data = readForm(e.target);
         if (!data.name || !data.name.trim()) return;
         data.noPhone = data.noPhone === 'on';
+        data.socialMute = data.socialMute === 'on';
         data.alternateGreetings = String(data.alternateGreetings || '').split('\n').map((g) => g.trim()).filter(Boolean);
         const av = getAvatar();
         if (av !== undefined) data.avatarImage = av;

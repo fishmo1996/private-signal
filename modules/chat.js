@@ -311,11 +311,11 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
             appendMessage(roomId, {
               role: 'character',
               senderId: character.id,
-              content: splitChatParts(vt.content).join('\n') || vt.content,
+              content: splitChatParts(vt.content, [character.name]).join('\n') || vt.content,
               ...(vt.voice ? { voice: true } : {}),
             });
           } else {
-            const parts = splitChatParts(vt.content);
+            const parts = splitChatParts(vt.content, [character.name]);
             for (const [pi, part] of parts.entries()) {
               if (pi > 0) {
                 notify({ typingBy: character.name });
@@ -622,10 +622,20 @@ export async function generateInnerVoice(roomId, messageId, characterId = null) 
 }
 
 /** 聊天感模式：把「---」分隔的回覆拆成多則(上限 3),像連發訊息。 */
-export function splitChatParts(text) {
-  return String(text || '')
+export function splitChatParts(text, names = []) {
+  let t = String(text || '');
+  // v64:模型會把第二則黏在同一行——「內容。---名字: (時間戳)內容」——行內的 --- 不換行,
+  // 原本的拆條切不到,名字/時間戳剝除器也只認行首,三道防線同時被繞過。
+  // 對策:行內「---名字:」與「---(時間戳)」先轉成標準分隔,再走原本的拆條。
+  for (const n of (Array.isArray(names) ? names : [names])) {
+    if (!n) continue;
+    const esc = String(n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    t = t.replace(new RegExp('\\s*-{3,}\\s*' + esc + '\\s*[::]\\s*', 'g'), '\n---\n');
+  }
+  t = t.replace(/\s*-{3,}\s*(?=[((][^\n]{0,18}?[\d0-9]{1,2}\s*[::][\d0-9]{2})/g, '\n---\n');
+  return t
     .split(/\n\s*-{3,}\s*\n?|^\s*-{3,}\s*$/m)
-    .map((t) => stripTsPrefix(t).trim()) // v62:拆條後每則再剝一次時間戳(--- 同行漏網案)
+    .map((tt) => stripTsPrefix(tt).trim()) // v62:拆條後每則再剝一次時間戳
     .filter(Boolean)
     .slice(0, 3);
 }

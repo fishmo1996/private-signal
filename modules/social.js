@@ -252,11 +252,11 @@ export function rollLengthDirective(kind = 'post', rng = Math.random) {
  * 所有角色的公開設定、共享記憶、世界書、貼文與留言本身。
  * 絕不含任何角色的 DM 私密記憶或場景記憶。
  */
-export function buildSocialPrompt({ post, triggerText, replyToName = null, rng = Math.random }) {
+export function buildSocialPrompt({ post, triggerText, replyToName = null, banter = false, rng = Math.random }) {
   const state = getState();
   const circle = circleOfPost(post, getCharacter);
   // 方案一：只有「認識這個人設」的角色會出面
-  const chars = state.characters.filter((c) => (c.knownPersonaId || state.defaultPersonaId) === circle && !c.noPhone);
+  const chars = state.characters.filter((c) => (c.knownPersonaId || state.defaultPersonaId) === circle && !c.noPhone && !c.socialMute);
   const persona = getPersona(circle) || defaultPersona();
   const cap = state.apiConfig?.maxReplyChars?.group ?? 1200;
 
@@ -303,17 +303,22 @@ export function buildSocialPrompt({ post, triggerText, replyToName = null, rng =
     `【貼文】${authorName}:${post.content}`,
     `【既有留言】\n${comments}`,
     ...(replyToName ? [`【剛剛的留言是指名回覆「${replyToName}」的：他應該優先出面回應；其他角色可補充也可以不出聲。`] : []),
+    ...(banter ? ['【互聊指令】這次不是回覆誰:是你們這群人自己在這篇貼文底下留言互動起來——可以互虧、接話、嗆發文的人、歪樓。'
+      + '依成員的年齡與熟度說話;若是台灣年輕人,用真實打字習慣:句短口語、語助詞和輕度髒話自然出現(幹、靠、笑死、==、好了啦),'
+      + '嗆人不用鋪陳,同一人可連發多則(輸出多個同名物件)。'] : []),
     `【現在時間】現在是 ${fmtMsgTime(Date.now())}。`,
     '【輸出格式】只輸出 JSON 陣列，不要其他文字:[{"name":"角色名","content":"留言"}]。'
-      + `0 到 3 則；像真實社群一樣，不必每個角色都留言，可以只有一人回或沒人回;`
+      + (banter ? '2 到 4 則；' : `0 到 3 則；像真實社群一樣，不必每個角色都留言，可以只有一人回或沒人回;`)
       + `留言是社群口吻，單則不超過 ${cap} 字，不要加名字前綴。`
       + `每位角色的留言長度各自不同：有人只回幾個字，有人寫一兩句，不要每個人都寫一樣長。${rollLengthDirective('comment', rng)}`,
   ].join('\n\n');
 
   // 注意:messages 不可為空(Gemini 會回 400 contents is not specified)
-  const trigger = triggerText === post.content
-    ? `我剛發布了這篇貼文:${post.content}`
-    : `我剛在這篇貼文底下留言:${triggerText}`;
+  const trigger = banter
+    ? '(這篇貼文掛在版上一陣子了，你們之中有人想留言互動。)'
+    : triggerText === post.content
+      ? `我剛發布了這篇貼文:${post.content}`
+      : `我剛在這篇貼文底下留言:${triggerText}`;
 
   return {
     system,
@@ -326,20 +331,20 @@ export function buildSocialPrompt({ post, triggerText, replyToName = null, rng =
  * 產生角色留言：開啟真實 AI 時走單次 API 呼叫，否則走既有 mock。
  * 回傳 {ok, replies:[{characterId, content, delay}]} 或 {ok:false, message}。
  */
-export async function generateSocialReplies({ post, triggerText, triggerPersonaId = null, replyToName = null }) {
+export async function generateSocialReplies({ post, triggerText, triggerPersonaId = null, replyToName = null, banter = false }) {
   const state = getState();
   const circle = circleOfPost(post, getCharacter);
-  const circleChars = state.characters.filter((c) => (c.knownPersonaId || state.defaultPersonaId) === circle && !c.noPhone);
+  const circleChars = state.characters.filter((c) => (c.knownPersonaId || state.defaultPersonaId) === circle && !c.noPhone && !c.socialMute);
 
   // 方案一：留言的人設若不屬於這個圈子，圈內角色不認識他，選擇無視
   const trigger = triggerPersonaId || state.activePersonaId || state.defaultPersonaId;
-  if (!circleChars.length || (trigger && trigger !== circle)) {
+  if (!circleChars.length || (!banter && trigger && trigger !== circle)) {
     return { ok: true, replies: [] };
   }
 
   const cfg = getApiConfig();
   if (!(cfg.useRealApi && cfg.apiKey && cfg.model)) {
-    let mock = generateMockSocialReplies({ post, triggerText })
+    let mock = generateMockSocialReplies({ post, triggerText: triggerText || post.content })
       .filter((m) => circleChars.some((c) => c.id === m.characterId));
     const named = replyToName ? circleChars.find((c) => c.name === replyToName) : null;
     if (named) {
@@ -353,7 +358,7 @@ export async function generateSocialReplies({ post, triggerText, triggerPersonaI
     }
     return { ok: true, replies: mock };
   }
-  const r = await generateReply(cfg, buildSocialPrompt({ post, triggerText, replyToName }),
+  const r = await generateReply(cfg, buildSocialPrompt({ post, triggerText, replyToName, banter }),
     { tier: getState().settings.secondaryForSocialDiary ? 'secondary' : 'primary' });
   if (!r.ok) return { ok: false, message: r.message };
   const replies = parseGroupReplies(r.text, circleChars)

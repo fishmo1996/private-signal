@@ -13,7 +13,7 @@ import { initUI, maybeShowChangelog } from './modules/ui.js';
 async function boot() {
   try {
     // 1. 載入預設設定(相對路徑,GitHub Pages 子路徑下也可正常運作)
-    const res = await fetch('./data/config.json');
+    const res = await fetch('./data/config.json', { cache: 'no-cache' });
     if (!res.ok) throw new Error(`無法載入 data/config.json(HTTP ${res.status})`);
     const config = await res.json();
   console.log(`[私人訊號] 版本:${config.version || '(未知)'}`);

@@ -371,6 +371,9 @@ export function stripNamePrefix(text, names = []) {
     );
     out = out.replace(re, '').replace(re, ''); // 刮兩次，處理「名字：名字：」的怪輸出
   }
+  // v64:名字剝除後再剝一次時間戳——覆蓋「名字:(時間戳)內容」的反向形態
+  // (上面先剝 TS 是為「(時間戳)名字:」;兩個方向都要,否則名字剝掉後時間戳浮上行首沒人管)
+  out = out.replace(TS_PREFIX, '').replace(REL_TIME_ECHO, '');
   return applyOutputRules(out).trim();
 }
 

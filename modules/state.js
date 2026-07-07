@@ -86,6 +86,7 @@ function migrate(s) {
   for (const ch of s.characters || []) {
     if (ch.status === undefined) ch.status = null; // 提案 M:通訊軟體狀態 {text, at}
     if (ch.label === undefined) ch.label = ''; // v61:備註標籤(只顯示，絕不進任何 prompt;同 persona.label 規矩)
+    if (ch.socialMute === undefined) ch.socialMute = false; // v65:不參與社群自動留言(常駐開關)
   }
   // v61:世界書條目補次要關鍵字(selective 觸發；空=行為與舊版完全相同)
   for (const wb of s.worldbooks || []) {
