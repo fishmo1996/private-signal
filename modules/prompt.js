@@ -210,7 +210,7 @@ export function buildPrompt({ character, roomId, innerVoiceOf = null }) {
   state.settings?.chatFeel !== false
     ? '以真實聊天軟體的口吻回覆：第一人稱、口語、像在打字。把回覆拆成 1~3 則短訊息(每則不超過 100 字),訊息之間用單獨一行「---」分隔。絕對不要第三人稱旁白敘事(不要寫「他抓了抓頭髮」這種)。動作或神態通常不用寫——真人打字很少描述自己的動作；偶爾需要時才用括號短註，而且要貼合你當下真實在做的事，不要有固定口頭禪式的重複動作。'
     : ''
-} 訊息可自然使用 emoji,頻率與風格依角色個性。${
+} emoji 預設節制:多數訊息不帶表符,偶爾在情緒真的需要時用一個;若上面有【Emoji 習慣】則完全以其為準。無論如何禁止使用 😏(除非 Emoji 習慣裡明確要求)。${
   state.settings?.voiceTag !== false && !character.noPhone
     ? '如果這則訊息更適合「用說的」(情緒濃的時刻、撒嬌、慵懶的晚安、哼一句歌),在訊息最開頭加上標記[語音]——大約一成的時機，別常用。'
     : ''
@@ -416,8 +416,12 @@ function recentFeedText(state, personaId = null, limit = 4) {
   // 所屬圈子的貼文;無圈子標記的舊貼文視為全域可見。修「同居線角色把家教線人設
   // 發的披薩文當成眼前這個你」的跨圈污染。
   const pid = personaId || state.defaultPersonaId;
+  const circleOfPost = (pp) => pp.personaId
+    || (pp.authorId !== 'player'
+      ? (state.characters.find((c) => c.id === pp.authorId)?.knownPersonaId || state.defaultPersonaId)
+      : null); // v70:舊角色貼文沒記圈 → 用作者認識的人設動態推,別再當全域可見
   const posts = (state.posts || [])
-    .filter((pp) => !pp.personaId || pp.personaId === pid)
+    .filter((pp) => { const cir = circleOfPost(pp); return !cir || cir === pid; })
     .slice(0, limit);
   if (!posts.length) return '(目前沒有動態)';
   return posts.map((p) => {
@@ -637,7 +641,7 @@ export function buildPhonePeekPrompt({ character, peekType }) {
     : [];
 
   const TASKS = {
-    draft: `【任務】想像你(${character.name})的手機訊息 App 裡，躺著幾則「打了又沒送出」的草稿。輸出 2~4 則：大多是想傳給${persona?.name || '玩家'}的，可以有一則是給你認識的其他人。每行一則，格式三欄：收件人||草稿內容||一句沒送出的原因(內心註記)。草稿的語氣必須符合你平常的訊息風格與目前的關係階段；沒送出的原因要誠實(遲疑、害羞、覺得太黏、時機不對……)。`,
+    draft: `【任務】想像你(${character.name})的手機訊息 App 裡，躺著幾則「打了又沒送出」的草稿。輸出 2~4 則：大多是想傳給${persona?.name || '玩家'}的，可以有一則是給你認識的其他人。每行一則，格式三欄：收件人||草稿內容||一句沒送出的原因(內心註記)。草稿的語氣必須符合你平常的訊息風格與目前的關係階段；沒送出的原因要誠實(遲疑、害羞、覺得太黏、時機不對……)。每一行三欄都必須齊全：不要輸出缺收件人或缺草稿內容的行,不要輸出只有內心註記的行。`,
     search: `【任務】輸出你(${character.name})手機瀏覽器「最近的搜尋紀錄」5~8 條，由最近到較早。每行一條搜尋關鍵字，像真人會打的那樣(可以口語、可以打錯重搜、可以好笑、可以洩露口是心非)。這些搜尋要反映你最近真正掛心的事。每行必須是「純搜尋關鍵字」：不要開場白、不要對任何人說話、不要括號動作或旁白描寫、不要任何說明句;不要複述你們對話裡說過的句子(搜尋紀錄不是訊息),也不要輸出「---」或任何分隔線。搜尋條目不要包含你自己的名字或自稱——沒有人會用自己的名字當每條搜尋的開頭。你認識的人也不會出現在你的搜尋裡：你不需要上網查你早就認識的人是誰。`,
     playlist: `【任務】輸出你(${character.name})音樂 App 的「最近播放」5~6 首。每行一首，格式：歌名 — 歌手。歌名與歌手必須全部虛構，不可使用任何真實存在的歌曲或藝人；但要「聽起來像存在」，風格符合你的品味與此刻心境。最後另起一行，以「循環理由：」開頭，寫一句你此刻反覆播放這些歌的原因。`,
   };

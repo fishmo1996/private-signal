@@ -10,7 +10,7 @@ import { getCharacter,
 } from './state.js';
 import { buildPrompt, buildGroupPrompt, buildStoryPrompt, buildPeekPrompt, buildRoomInnerVoicePrompt } from './prompt.js';
 import { getApiConfig, generateReply, stripNamePrefix, parseGroupReplies, stripTsPrefix } from './api.js';
-import { extractVoiceTag, extractMoodTag, extractStatusTag } from './voice.js';
+import { extractVoiceTag, harvestTailTags } from './voice.js';
 import { anniversaryTextFor } from './album.js';
 import { anniversaryMemoryHits } from './memory.js';
 import { ttsAvailable } from './voice.js';
@@ -301,11 +301,10 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
         notify({ typingBy: character.name });
         const r = await generateReply(cfg, prompt);
         if (r.ok) {
-          const md = extractMoodTag(stripNamePrefix(r.text, [character.name]));
+          const md = harvestTailTags(stripNamePrefix(r.text, [character.name])); // v71:不限順序收割尾部標記
           if (md.mood) { room.mood = { emoji: md.mood, at: Date.now() }; }
-          const st = extractStatusTag(md.content);
-          applyStatusTag(character, st.status);
-          const vt = extractVoiceTag(st.content);
+          applyStatusTag(character, md.status);
+          const vt = extractVoiceTag(md.content);
           if (vt.voice || getState().settings.chatFeel === false) {
             // 語音訊息維持單則
             appendMessage(roomId, {
@@ -633,6 +632,13 @@ export function splitChatParts(text, names = []) {
     t = t.replace(new RegExp('\\s*-{3,}\\s*' + esc + '\\s*[::]\\s*', 'g'), '\n---\n');
   }
   t = t.replace(/\s*-{3,}\s*(?=[((][^\n]{0,18}?[\d0-9]{1,2}\s*[::][\d0-9]{2})/g, '\n---\n');
+  // v70:無 dash 的行內黏合——「內容。名字:(時間戳)內容」(v64 只防了帶 --- 的形態,模型學會不打 dash)
+  // 只在「名字: 後面緊跟時間戳括號」才切,一般轉述「名字:你好」不受影響。
+  for (const n of (Array.isArray(names) ? names : [names])) {
+    if (!n) continue;
+    const esc = String(n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    t = t.replace(new RegExp(esc + '\\s*[::]\\s*(?=[((][^\\n]{0,18}?[\\d0-9]{1,2}\\s*[::][\\d0-9]{2})', 'g'), '\n---\n');
+  }
   return t
     .split(/\n\s*-{3,}\s*\n?|^\s*-{3,}\s*$/m)
     .map((tt) => stripTsPrefix(tt).trim()) // v62:拆條後每則再剝一次時間戳
@@ -807,11 +813,10 @@ export async function refreshChats(opts = {}) {
   }
   if (!content) return { ok: true };
 
-  const mdP = extractMoodTag(content);
+  const mdP = harvestTailTags(content); // v71:不限順序收割尾部標記
   if (mdP.mood) { room.mood = { emoji: mdP.mood, at: Date.now() }; }
-  const stP = extractStatusTag(mdP.content);
-  applyStatusTag(character, stP.status);
-  const vtP = extractVoiceTag(stP.content);
+  applyStatusTag(character, mdP.status);
+  const vtP = extractVoiceTag(mdP.content);
   appendMessage(room.id, {
     role: 'character', senderId: character.id, content: vtP.content,
     ...(isCall

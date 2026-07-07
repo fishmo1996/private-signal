@@ -305,7 +305,7 @@ export async function generateReply(cfg, prompt, opts = {}) {
       }
       const data = await res.json();
       const text = extractReplyText(cfg.provider, data).trim();
-      if (!text) return { ok: false, message: '模型回傳了空內容(可能被安全過濾或輸出長度不足)' };
+      if (!text) return { ok: false, message: '這一則被模型服務暫時擋下(內容審查誤判或長度不足),再試一次通常就好——與你的內容無關。' };
       const cap = prompt.meta?.maxReplyChars || 800;
       return { ok: true, text: text.length > cap ? `${text.slice(0, cap)}…` : text };
     } catch (err) {

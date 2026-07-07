@@ -114,6 +114,33 @@ export function extractStatusTag(text) {
   return { content: t.slice(0, m.index).trim(), status };
 }
 
+/**
+ * v71:尾部標記統一收割器。模型輸出結尾的「[標籤:內容]」行(不限順序、不限數量)
+ * 一次收割:認識的(心情/狀態)各就各位;不認識的山寨標記(模型自創的 [好感度:x] 等)
+ * 直接丟棄不裸露。取代「先抽心情再抽狀態」的順序依賴——舊做法要求標記在絕對結尾,
+ * 模型把 [心情] 寫在 [狀態] 前面就全組 miss(擁有者截圖實案)。
+ * 只收「尾部連續的標記行」,遇到第一個非標記行就停,正文中的括號不受影響。
+ */
+export function harvestTailTags(text) {
+  const lines = String(text || '').split('\n');
+  let mood = null;
+  let status = null;
+  let end = lines.length;
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i].trim();
+    if (!line) { end = i; continue; } // 尾部空行一併收掉
+    const m = line.match(/^(?:\[|\u3010)([^:\uFF1A\]\u3011]{1,6})[:\uFF1A]\s*([^\]\u3011]*?)\s*(?:\]|\u3011)$/); // 冒號/括號全半形皆認(明確碼位)
+    if (!m) break; // 非標記行:收割結束
+    const tag = m[1].trim();
+    const val = m[2].trim();
+    if (tag === '心情' && val && [...val].length <= 4) mood = mood ?? val;
+    else if (tag === '狀態') status = status ?? (val && val.length <= 15 ? val : null);
+    // 其他標籤:丟棄(不裸露、不進訊息)
+    end = i;
+  }
+  return { content: lines.slice(0, end).join('\n').trim(), mood, status };
+}
+
 /** 從 AI 輸出偵測「[語音]」標記：回傳 {content, voice}。 */
 export function extractVoiceTag(text) {
   const t = String(text || '');

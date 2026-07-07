@@ -2,10 +2,12 @@
  * modules/bookexport.js — 提案 B:正文匯出成書。
  * 把已封存章節+目前章節匯出為單一自包含 HTML(離線可讀、書頁版式、目錄跳章)。
  * 全程零 API 呼叫：純本地複製+轉義+拼裝，不經模型、無任何內容過濾。
- * 內容規則(擁有者拍板):只收 narrator 與 character;user(玩家輸入)與 system 不進書。
+ * 內容規則(擁有者拍板,v69 改版):收 narrator、character 與 user(玩家發言,
+ * 以專屬樣式區塊完整編入,與角色台詞視覺區隔);system 不進書。
  */
 
 import { getState, getCharacter } from './state.js';
+import { personaForRoom } from './persona.js';
 
 /** esc() 等價轉義：書檔同為 innerHTML 語意,XSS 防線不可繞過。 */
 function escB(str) {
@@ -14,14 +16,18 @@ function escB(str) {
     .replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }
 
-function paragraphsOf(messages) {
+function paragraphsOf(messages, playerName) {
   return messages
-    .filter((m) => m.role === 'narrator' || m.role === 'character')
+    .filter((m) => m.role === 'narrator' || m.role === 'character' || m.role === 'user')
     .map((m) => {
       const body = escB(m.content).replaceAll('\n', '<br>');
       if (m.role === 'character') {
         const who = m.senderId && m.senderId !== 'system' ? (getCharacter(m.senderId)?.name || '') : '';
         return `<p class="line">${who ? `<b>${escB(who)}</b>:` : ''}${body}</p>`;
+      }
+      if (m.role === 'user') {
+        // v69:玩家發言完整入書,專屬樣式區塊(與角色台詞視覺區隔)
+        return `<p class="me">${playerName ? `<b>${escB(playerName)}</b>:` : ''}${body}</p>`;
       }
       return `<p>${body}</p>`;
     })
@@ -36,11 +42,12 @@ export function exportStoryBook(roomId) {
   const room = state.rooms.find((r) => r.id === roomId);
   if (!room || room.type !== 'story') return null;
 
+  const playerName = personaForRoom(room)?.name || '';
   const chapters = [
     ...(room.archivedChapters || []).map((ch) => ({ title: ch.title, messages: ch.messages })),
   ];
   const current = (state.messagesByRoom[roomId] || []);
-  if (current.some((m) => m.role === 'narrator' || m.role === 'character')) {
+  if (current.some((m) => m.role === 'narrator' || m.role === 'character' || m.role === 'user')) {
     chapters.push({ title: `第 ${(room.chapterCount || 0) + 1} 章(進行中)`, messages: current });
   }
 
@@ -48,7 +55,7 @@ export function exportStoryBook(roomId) {
   const body = chapters.map((ch, i) => `
     <section id="ch${i + 1}">
       <h2>${escB(ch.title)}</h2>
-      ${paragraphsOf(ch.messages)}
+      ${paragraphsOf(ch.messages, playerName)}
     </section>`).join('\n');
 
   const d = new Date();
@@ -73,6 +80,8 @@ export function exportStoryBook(roomId) {
   h2 { font-size: 19px; border-bottom: 1px solid #e5dad2; padding-bottom: 8px; letter-spacing: .05em; }
   p { font-size: 15.5px; line-height: 2.05; letter-spacing: .02em; margin: 0 0 1.2em; text-align: justify; }
   p.line b { color: #7a5c52; font-weight: 600; }
+  p.me { background: #f2eae3; border-left: 3px solid #b08a7a; padding: 10px 14px; border-radius: 0 10px 10px 0; }
+  p.me b { color: #8a6a5c; font-weight: 600; }
 </style>
 </head>
 <body>

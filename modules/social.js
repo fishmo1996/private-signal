@@ -53,7 +53,11 @@ export async function createPost(authorId, content, image = null, personaId = nu
     authorId,
     content: text,
     image: image || null,
-    personaId: authorId === 'player' ? (personaId || getState().activePersonaId || getState().defaultPersonaId) : null,
+    personaId: authorId === 'player'
+      ? (personaId || getState().activePersonaId || getState().defaultPersonaId)
+      // v70:角色貼文記「作者認識的人設」圈——原本存 null 被 recentFeedText 當全域可見,
+      // 深海線角色的貼文洩進家教線的旁觀群(跨圈污染,與披薩事件同族)。
+      : (getState().characters.find((c) => c.id === authorId)?.knownPersonaId || getState().defaultPersonaId),
     createdAt: Date.now(),
     likes: 0,
     likedByPlayer: false,

@@ -23,7 +23,9 @@ const peekBusy = new Set();
  * 全部被過濾時退回原文，寧可醜也不吞掉內容。
  */
 export function sanitizeSearchSnapshot(text) {
-  const lines = String(text || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const lines = String(text || '')
+    .replace(/<\/?[a-zA-Z][^>]*>/g, '') // v67:清掉模型手滑吐出的 HTML 標籤殘骸(</blockquote> 等)
+    .split('\n').map((l) => l.trim()).filter(Boolean);
   const kept = lines.filter((l) => {
     if (/^[((\[【「]/.test(l)) return false;        // 旁白/動作描寫開頭
     if (/[::]$/.test(l)) return false;              // 開場白(冒號結尾)
@@ -35,6 +37,20 @@ export function sanitizeSearchSnapshot(text) {
     return true;
   });
   return kept.length ? kept.join('\n') : String(text || '').trim();
+}
+
+/**
+ * v68:草稿快照輕量清潔。草稿格式是「真心話||OS」用 || 分隔,不能套搜尋那套逐行過濾
+ * (會誤刪),只針對草稿實際會出的兩種髒東西:HTML 標籤殘骸、以及被當成內容吐出來的
+ * 「---」分隔線與純旁白行。
+ */
+export function sanitizeDraftSnapshot(text) {
+  const lines = String(text || '')
+    .replace(/<\/?[a-zA-Z][^>]*>/g, '') // HTML 標籤殘骸
+    .split('\n').map((l) => l.trim())
+    .filter((l) => l && !/^-{2,}$/.test(l) && !/^[-—=~*·。\s]+$/.test(l)) // 丟純分隔線/純符號行
+    .filter((l) => !/^\|\|/.test(l)); // v70:丟「||」開頭的行(缺收件人/本體、只剩內心註記的走鐘草稿)
+  return lines.join('\n').trim();
 }
 
 function listOf(charId) {
@@ -72,7 +88,8 @@ export async function generatePhonePeek(characterId, peekType) {
       if (!r.ok) return { ok: false, message: r.message };
       content = stripNamePrefix(r.text, [character.name]).trim();
       if (peekType === 'search') content = sanitizeSearchSnapshot(content); // v61 輸出端防線
-      if (!content) return { ok: false, message: '模型回傳了空內容，再試一次' };
+      if (peekType === 'draft') content = sanitizeDraftSnapshot(content); // v68:草稿去 --- 與 HTML
+      if (!content) return { ok: false, message: '這一則被模型服務暫時擋下了(常見於敏感詞誤判)。再按一次「更新快照」通常就正常——這不是你的問題。' };
     } else {
       content = MOCK[peekType];
     }
