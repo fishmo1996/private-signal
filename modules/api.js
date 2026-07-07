@@ -396,6 +396,20 @@ export function parseGroupReplies(text, participants, maxReplies = 3) {
     if (Array.isArray(parsed)) items = parsed;
   } catch { /* fallthrough */ }
 
+  // v66:JSON.parse 炸掉時(content 含裸換行、尾逗號等模型手滑),正則逐物件救援——
+  // 不依賴整段 JSON 合法,能撈幾則是幾則。沒有這層,整坨原始碼會被當成第一人的留言貼出來。
+  if (!items) {
+    const rescued = [];
+    const rx = /"name"\s*:\s*"([^"]{1,40})"\s*,\s*"content"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+    let m;
+    while ((m = rx.exec(raw)) !== null) {
+      let content = m[2];
+      try { content = JSON.parse(`"${m[2].replace(/\r?\n/g, '\\n')}"`); } catch { /* 保留原文 */ }
+      rescued.push({ name: m[1], content });
+    }
+    if (rescued.length) items = rescued;
+  }
+
   if (!items) {
     const content = stripNamePrefix(text, names);
     return content && participants[0]
