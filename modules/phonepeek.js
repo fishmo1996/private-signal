@@ -25,7 +25,12 @@ const peekBusy = new Set();
 export function sanitizeSearchSnapshot(text) {
   const lines = String(text || '')
     .replace(/<\/?[a-zA-Z][^>]*>/g, '') // v67:清掉模型手滑吐出的 HTML 標籤殘骸(</blockquote> 等)
-    .split('\n').map((l) => l.trim()).filter(Boolean);
+    .split('\n').map((l) => l.trim()).filter(Boolean)
+    // v76:UI 動詞前綴剝除(擁有者截圖「送出如何讓女朋友停止撒嬌」)——剝前綴留關鍵字,不丟整行。
+    // 「送出」開頭的真實搜尋幾乎不存在,無冒號也剝;「傳送/輸入/搜尋/查詢」則可能是內容本身
+    // (「傳送門」「搜尋不到朋友的IG」),必須帶冒號(明確是標籤)才剝,避免誤傷。
+    .map((l) => l.replace(/^送出[::]?\s*/, '').replace(/^(?:傳送|輸入|搜尋|查詢)[::]\s*/, '').trim())
+    .filter(Boolean);
   const kept = lines.filter((l) => {
     if (/^[((\[【「]/.test(l)) return false;        // 旁白/動作描寫開頭
     if (/[::]$/.test(l)) return false;              // 開場白(冒號結尾)
@@ -37,8 +42,10 @@ export function sanitizeSearchSnapshot(text) {
     if (/輸出|^請|快照|搜尋紀錄/.test(l)) return false; // v74:模型複述任務指令(「請輸出你的搜尋紀錄」echo)
     return true;
   });
-  // v74:全部被攔=整包都是髒的,回空讓呼叫端報「重按一次」——舊 fallback 把髒原文
-  // 原樣放行(「全髒=全放」),擁有者親眼看到「---」與指令複述兩條並排展出。
+  // v76:下限閘門——任務要 5~8 條,清潔後剩不到 3 條=那次生成幾乎全髒,殘渣通常就是
+  // 漏網對話句(擁有者截圖:整包只剩一條「準備好迎接我了嗎?」)。整包失格回空,
+  // 呼叫端報「攔下請重按」;寧可空手也不端殘菜(v74 教訓的延伸)。
+  if (kept.length < 3) return '';
   return kept.join('\n');
 }
 
@@ -52,7 +59,10 @@ export function sanitizeDraftSnapshot(text) {
     .replace(/<\/?[a-zA-Z][^>]*>/g, '') // HTML 標籤殘骸
     .split('\n').map((l) => l.trim())
     .filter((l) => l && !/^-{2,}$/.test(l) && !/^[-—=~*·。\s]+$/.test(l)) // 丟純分隔線/純符號行
-    .filter((l) => !/^\|\|/.test(l)); // v70:丟「||」開頭的行(缺收件人/本體、只剩內心註記的走鐘草稿)
+    .filter((l) => !/^\|\|/.test(l)) // v70:丟「||」開頭的行(缺收件人/本體、只剩內心註記的走鐘草稿)
+    // v76:欄位守門——沒有任何「||」的裸句=走鐘(缺「沒送出的原因」欄,擁有者截圖:整包只剩
+    // 一句下一則台詞充當草稿)。合法格式=三欄新版或二欄舊版,至少含一個 ||;全丟=回空攔下重按。
+    .filter((l) => l.includes('||'));
   return lines.join('\n').trim();
 }
 

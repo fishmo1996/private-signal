@@ -3,7 +3,10 @@
  * 全域狀態的建立、載入與保存。所有模組透過這裡取得同一份 state 物件。
  */
 
-import { loadState, saveState, clearState, findLegacyState } from '../utils/indexeddb.js';
+import {
+  loadState, saveState, clearState, findLegacyState,
+  SNAPSHOT_KEYS, readSnapshotRecord, writeSnapshotRecord,
+} from '../utils/indexeddb.js';
 
 let state = null;
 let config = null;
@@ -235,6 +238,7 @@ export async function initState(loadedConfig) {
   const saved = await loadState();
 
   if (saved) {
+    await maybeTakeBootSnapshot(saved); // v75:migrate 之前先快照——存的是上一 session 的原貌;失敗不影響開機
     state = migrate(saved);
     return state;
   }
@@ -306,7 +310,20 @@ export function getRoomCharacters(room) {
 export function exportStateJson() {
   // 深拷貝後移除機密:API 金鑰絕不進入備份檔(備份常被傳到雲端/通訊軟體)。
   // 不可動到執行中的 state。
-  const copy = JSON.parse(JSON.stringify(state));
+  const copy = stripSecrets(JSON.parse(JSON.stringify(state)));
+  return JSON.stringify(
+    { exportedAt: Date.now(), app: 'private-signal', secretsExcluded: true, state: copy },
+    null,
+    2,
+  );
+}
+
+/* ------------------------------------------------------------
+ * 機密剝除與金鑰保留(v75 抽出共用:備份匯出、快照、還原三處同一套邏輯)
+ * ------------------------------------------------------------ */
+
+/** 從「已是拷貝」的 state 上移除所有 API 金鑰(就地修改該拷貝並回傳)。絕不可傳入執行中的 state 本體。 */
+function stripSecrets(copy) {
   if (copy.apiConfig) {
     copy.apiConfig.apiKey = '';
     if (Array.isArray(copy.apiConfig.presets)) {
@@ -315,11 +332,94 @@ export function exportStateJson() {
       );
     }
   }
-  return JSON.stringify(
-    { exportedAt: Date.now(), app: 'private-signal', secretsExcluded: true, state: copy },
-    null,
-    2,
-  );
+  return copy;
+}
+
+/** 記下目前裝置上已輸入的金鑰(主+presets),覆蓋資料前呼叫。 */
+function captureLocalKeys() {
+  return {
+    key: state?.apiConfig?.apiKey || '',
+    presetKeys: (state?.apiConfig?.presets || []).map((p) => p?.apiKey || ''),
+  };
+}
+
+/** 把 captureLocalKeys 記下的金鑰塞回新 state(只填空缺,不覆蓋新資料自帶的值)。 */
+function applyLocalKeys(target, cap) {
+  if (!target.apiConfig) return;
+  if (!target.apiConfig.apiKey && cap.key) target.apiConfig.apiKey = cap.key;
+  if (Array.isArray(target.apiConfig.presets)) {
+    target.apiConfig.presets = target.apiConfig.presets.map((p, i) => {
+      if (p && !p.apiKey && cap.presetKeys[i]) return { ...p, apiKey: cap.presetKeys[i] };
+      return p;
+    });
+  }
+}
+
+/* ------------------------------------------------------------
+ * 自動快照(v75):開機時輪替留存前一 session 的完整 state。
+ * - 保留 2 份(SNAPSHOT_KEYS),覆蓋最舊的那格
+ * - 6 小時內只留一份:避免同一晚多次開機把兩格洗成同一天,失去「可退回昨天」的價值
+ * - 快照比照備份鐵律不含金鑰;還原時沿用本機現有金鑰(applyLocalKeys)
+ * - 任何失敗只 console.warn,絕不影響開機
+ * ------------------------------------------------------------ */
+
+const SNAPSHOT_MIN_GAP_MS = 6 * 60 * 60 * 1000;
+
+/** 深拷貝 state(structuredClone 優先,環境不支援時退 JSON)。 */
+function deepCopyState(s) {
+  try { return structuredClone(s); } catch { return JSON.parse(JSON.stringify(s)); }
+}
+
+async function maybeTakeBootSnapshot(saved) {
+  try {
+    const slots = [];
+    for (const k of SNAPSHOT_KEYS) slots.push({ key: k, rec: await readSnapshotRecord(k) });
+    const newest = Math.max(0, ...slots.map((sl) => sl.rec?.takenAt || 0));
+    if (newest && Date.now() - newest < SNAPSHOT_MIN_GAP_MS) return;
+    const oldest = slots.reduce((a, b) => ((a.rec?.takenAt || 0) <= (b.rec?.takenAt || 0) ? a : b));
+    await writeSnapshotRecord(oldest.key, {
+      takenAt: Date.now(),
+      state: stripSecrets(deepCopyState(saved)),
+    });
+  } catch (err) {
+    console.warn('[快照] 開機快照失敗(不影響使用):', err);
+  }
+}
+
+/** 設定頁清單用:現存快照的摘要(新在前)。 */
+export async function listStateSnapshots() {
+  const out = [];
+  for (const k of SNAPSHOT_KEYS) {
+    let rec = null;
+    try { rec = await readSnapshotRecord(k); } catch { /* 單格壞掉不擋清單 */ }
+    if (!rec || !rec.state) continue;
+    const s = rec.state;
+    out.push({
+      key: k,
+      takenAt: rec.takenAt || 0,
+      characters: (s.characters || []).length,
+      rooms: (s.rooms || []).length,
+      messages: Object.values(s.messagesByRoom || {})
+        .reduce((n, list) => n + (Array.isArray(list) ? list.length : 0), 0),
+    });
+  }
+  return out.sort((a, b) => b.takenAt - a.takenAt);
+}
+
+/**
+ * 用快照覆蓋目前資料(呼叫端應先讓使用者確認並自動匯出目前備份)。
+ * 金鑰:快照不含金鑰,還原後沿用本機現有金鑰。格式不對丟錯、不動任何資料。
+ */
+export async function restoreSnapshot(key) {
+  const rec = await readSnapshotRecord(key);
+  if (!rec || !rec.state || !Array.isArray(rec.state.characters)) {
+    throw new Error('快照不存在或已損毀');
+  }
+  const cap = captureLocalKeys();
+  state = migrate(deepCopyState(rec.state)); // 拷貝後才 migrate:快照原件留在庫裡不被就地修改
+  applyLocalKeys(state, cap);
+  await persist();
+  return state;
 }
 
 /**
@@ -338,20 +438,10 @@ export async function importStateJson(jsonText) {
     throw new Error('備份檔結構不符(缺少 characters / rooms)');
   }
   // 保留本機已輸入的 API 金鑰：備份不含機密，匯入不得清空目前裝置上的 key。
-  const localKey = state?.apiConfig?.apiKey || '';
-  const localPresetKeys = (state?.apiConfig?.presets || []).map((p) => p?.apiKey || '');
+  const cap = captureLocalKeys();
 
   state = migrate(candidate);
-
-  if (state.apiConfig) {
-    if (!state.apiConfig.apiKey && localKey) state.apiConfig.apiKey = localKey;
-    if (Array.isArray(state.apiConfig.presets)) {
-      state.apiConfig.presets = state.apiConfig.presets.map((p, i) => {
-        if (p && !p.apiKey && localPresetKeys[i]) return { ...p, apiKey: localPresetKeys[i] };
-        return p;
-      });
-    }
-  }
+  applyLocalKeys(state, cap);
   await persist();
   return state;
 }

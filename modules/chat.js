@@ -9,7 +9,7 @@ import { getCharacter,
   getState, genId, persist, getRoom, getRoomMessages, getRoomCharacters,
 } from './state.js';
 import { buildPrompt, buildGroupPrompt, buildStoryPrompt, buildPeekPrompt, buildRoomInnerVoicePrompt } from './prompt.js';
-import { getApiConfig, generateReply, stripNamePrefix, parseGroupReplies, stripTsPrefix } from './api.js';
+import { getApiConfig, generateReply, stripNamePrefix, parseGroupReplies, stripTsPrefix, cutInlineTsRecitation } from './api.js';
 import { extractVoiceTag, harvestTailTags } from './voice.js';
 import { anniversaryTextFor } from './album.js';
 import { anniversaryMemoryHits } from './memory.js';
@@ -603,6 +603,7 @@ export async function generateInnerVoice(roomId, messageId, characterId = null) 
       const r = await generateReply(cfg, prompt, { tier: 'secondary' });
       if (!r.ok) return { ok: false, message: r.message };
       text = stripNamePrefix(r.text, [character.name]).trim();
+      text = cutInlineTsRecitation(text, [character.name]); // v76:行內「名字:(時間戳)」截尾+孤立時間戳剝除(心聲不走拆條,v70 防線管不到)
       if (!text) return { ok: false, message: '模型回傳了空內容，再按一次試試' };
     } else {
       text = '(嘴上說得輕鬆，其實剛剛心跳快得不像話。希望沒被發現。)';

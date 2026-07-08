@@ -41,12 +41,12 @@ import { exportStoryBook } from './bookexport.js';
 import { generatePhonePeek, phonePeeksFor, PEEK_TYPES } from './phonepeek.js';
 import { mountPet, unmountPet, petSettings } from './pet.js';
 import { exportCharacterPack, exportCharacterCardV2, parseCharacterImport, importCharacter } from './charcard.js';
-import { exportStateJson, importStateJson } from './state.js';
+import { exportStateJson, importStateJson, listStateSnapshots, restoreSnapshot } from './state.js';
 import {
   getPersonas, getPersona, defaultPersona, personaForRoom,
   createPersona, updatePersona, deletePersona, syncPlayerMirror,
 } from './persona.js';
-import { buildPrompt, buildGroupPrompt, buildStoryPrompt, buildPeekPrompt } from './prompt.js';
+import { buildPrompt, buildGroupPrompt, buildStoryPrompt, buildPeekPrompt, fmtMsgTime } from './prompt.js';
 import {
   getWorldbooks, getWorldbook, createWorldbook, updateWorldbook, deleteWorldbook,
   addEntry, updateEntry, deleteEntry, parseKeywords,
@@ -2615,6 +2615,10 @@ function renderSettings() {
       </div>
       <button class="danger-btn slim" id="btnClearAll">清除本機資料</button>
 
+      <div class="people-heading">自動快照</div>
+      <div class="panel-note">每次開機自動留存前一次的完整資料(最多 2 份,6 小時內不重複)。資料玩壞或匯錯備份時可退回;快照只存在這台裝置,不含 API 金鑰。「清除本機資料」會連快照一併清除。</div>
+      <div id="snapshotList"><div class="panel-note">快照讀取中…</div></div>
+
       <div class="people-heading">關於</div>
       <div class="about-block">
         <div class="about-name">${esc(cfg.appName)}</div>
@@ -2927,6 +2931,45 @@ function renderSettings() {
       },
     });
   });
+
+  // 資料:自動快照清單(讀 IndexedDB 是非同步,先占位再填;還原前先自動下載目前狀態的備份=雙保險)
+  (async () => {
+    const box = els.phoneScreen.querySelector('#snapshotList');
+    if (!box) return;
+    try {
+      const snaps = await listStateSnapshots();
+      if (!snaps.length) {
+        box.innerHTML = '<div class="panel-note">尚無快照——下一次開啟 App 會自動建立第一份。</div>';
+        return;
+      }
+      box.innerHTML = snaps.map((s) => `
+        <div class="snapshot-row">
+          <span class="snapshot-info">${esc(fmtMsgTime(s.takenAt))}<br><span class="snapshot-sub">角色 ${s.characters}・聊天室 ${s.rooms}・訊息 ${s.messages}</span></span>
+          <button class="ghost-btn slim" data-restore="${esc(s.key)}">還原</button>
+        </div>`).join('');
+      box.querySelectorAll('[data-restore]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          openConfirmModal({
+            title: '退回這份快照？',
+            body: '會先自動下載一份「目前狀態」的備份 JSON(雙保險),再用快照完全覆蓋目前資料。API 金鑰不受影響、不用重填。',
+            confirmLabel: '下載備份並還原',
+            onConfirm: async () => {
+              try {
+                const d = new Date();
+                downloadJson(exportStateJson(), `private-signal-before-restore-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}.json`);
+                await restoreSnapshot(btn.dataset.restore);
+                location.reload(); // 與匯入備份同流程:重新啟動,乾淨載入還原後的資料
+              } catch (err) {
+                alert(`還原失敗:${err.message}(目前資料未被更動)`);
+              }
+            },
+          });
+        });
+      });
+    } catch {
+      box.innerHTML = '<div class="panel-note">快照讀取失敗。</div>';
+    }
+  })();
 }
 
 /* ---------------- 右側：管理輔助面板(預設收合) ---------------- */

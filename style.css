@@ -1839,6 +1839,12 @@ body.theme-dusk .mc-play { background: rgba(255,255,255,.08); }
 /* 備份黃燈 */
 .backup-warn { margin-top: 6px; padding: 8px 10px; border-radius: 8px; font-size: calc(12px * var(--fs-mult)); background: rgba(230, 180, 60, .16); border: 1px solid rgba(230, 180, 60, .4); color: var(--ink); }
 
+/* 自動快照清單(v75) */
+.snapshot-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; margin-top: 6px; border: 1px solid rgba(128,128,128,.2); border-radius: 10px; background: rgba(255,255,255,.25); }
+body.theme-dusk .snapshot-row { background: rgba(255,255,255,.05); }
+.snapshot-info { font-size: calc(13px * var(--fs-mult)); color: var(--ink); line-height: 1.5; }
+.snapshot-sub { font-size: calc(11px * var(--fs-mult)); color: var(--ink-faint); }
+
 /* 心聲紀錄(O-1)與更新彈窗(O-2) */
 .iv-log { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow-y: auto; }
 .iv-log-item { text-align: left; border: 1px solid rgba(128,128,128,.2); border-radius: 10px; padding: 8px 10px; background: rgba(255,255,255,.25); cursor: pointer; display: flex; flex-direction: column; gap: 2px; }

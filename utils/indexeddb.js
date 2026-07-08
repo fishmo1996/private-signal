@@ -116,6 +116,39 @@ export async function clearState() {
 
 
 /* ------------------------------------------------------------
+ * 自動快照(v75):同一 object store 內的獨立 key,與主 state 互不覆蓋。
+ * 輪替 2 份,由 state.js 的開機流程負責寫入與輪替;這裡只做最小存取。
+ * 注意:clearState() 是 store.clear(),「清除本機資料」會連快照一併清掉
+ * ——這是刻意的:使用者按下全清就是要全清,快照不可變成殘留。
+ * 但「匯入備份」只覆蓋主 state key,快照存活——匯錯檔可用快照退回。
+ * ------------------------------------------------------------ */
+
+export const SNAPSHOT_KEYS = ['snapshot-a', 'snapshot-b'];
+
+/** 讀取一份快照 record({takenAt, state});不存在回傳 null。 */
+export async function readSnapshotRecord(key) {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const req = tx.objectStore(STORE_NAME).get(key);
+    req.onsuccess = () => resolve(req.result ?? null);
+    req.onerror = () => reject(req.error || new Error('讀取快照失敗'));
+  });
+}
+
+/** 寫入一份快照 record(整格覆寫)。 */
+export async function writeSnapshotRecord(key, record) {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).put(record, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error('保存快照失敗'));
+    tx.onabort = () => reject(tx.error || new Error('保存快照交易被中止'));
+  });
+}
+
+/* ------------------------------------------------------------
  * 舊資料救援:安全搜尋其他可能的資料庫名稱。
  * 只「讀取」,絕不刪除或修改來源資料庫。
  * ------------------------------------------------------------ */

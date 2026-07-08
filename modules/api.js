@@ -342,6 +342,26 @@ export function applyOutputRules(text) {
   return out;
 }
 
+/**
+ * v76:時間戳鸚鵡第四形態(擁有者截圖:心聲卡出現行內「陳以彥: (7/8(週三) 14:57)…」+複述下一句台詞)。
+ * v70 的行內防線做在 splitChatParts,但心聲是單張思緒卡不走拆條,行內形態沒人管。
+ * 對策(必需特徵=「名字:+時間戳括號」,同 v70 通則):
+ * ①遇行內「名字:(時間戳)」→ 從名字處整段截尾——後面是複述的台詞,聊天室本來就看得到,留著只是噪音;
+ * ②行內孤立的時間戳括號一律剝除(防誤剝沿 v60 規格:時分「緊接」右括號才算,「(晚上8:30見)」時分後有字不剝)。
+ * 用在心聲兩路徑(DM/房內);聊天訊息不需要——那條線有拆條+行首剝除器管。
+ */
+const TS_INLINE = '[((][^\\n]{0,18}?[\\d0-9]{1,2}\\s*[::][\\d0-9]{2}\\s*[))]';
+export function cutInlineTsRecitation(text, names = []) {
+  let out = String(text || '');
+  for (const name of (Array.isArray(names) ? names : [names])) {
+    const n = String(name || '').trim();
+    if (!n) continue;
+    out = out.replace(new RegExp(escapeRegex(n) + '\\s*[::]\\s*' + TS_INLINE + '[\\s\\S]*$'), '');
+  }
+  out = out.replace(new RegExp(TS_INLINE, 'g'), '');
+  return out.trim();
+}
+
 /** 模型鸚鵡學舌時間戳的清除：剝掉每行開頭的「(7/5(週日) 14:22)」式前綴。
  *  寬容版(v60):模型會吐全形數字/全形冒號/雜字變體，截圖上肉眼相同但字元不同。
  *  策略：行首括號塊、容忍至多 18 個雜字(含內層括號),只要含「時：分」樣式(全半形皆認)
