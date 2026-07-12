@@ -324,6 +324,7 @@ export async function generateReply(cfg, prompt, opts = {}) {
         }
       }
       const text = extractReplyText(cfg.provider, data).trim();
+      recordUsage(cfg.provider, data, prompt.meta); // v81(f3):token 用量入帳(失敗靜默,不影響回覆)
       if (!text) return { ok: false, message: '這一則被模型服務暫時擋下(內容審查誤判或長度不足),再試一次通常就好——與你的內容無關。' };
       const cap = prompt.meta?.maxReplyChars || 800;
       return { ok: true, text: text.length > cap ? `${text.slice(0, cap)}…` : text };
@@ -334,6 +335,35 @@ export async function generateReply(cfg, prompt, opts = {}) {
     }
   }
   return { ok: false, message: lastMessage || '未知錯誤' };
+}
+
+/**
+ * v81(f3):token 帳單——各供應商回應都附用量數字,以前直接丟掉。存進 state.usageLog
+ * (滾動 400 筆),開發資訊出儀表板:今天/7日花費、思考 token 佔比、最燒的房。
+ * meta.roomId/mode 由各 prompt 建構器帶(v81 起),沒帶的歸「其他」。
+ */
+function recordUsage(provider, data, meta) {
+  try {
+    const u = provider === 'gemini'
+      ? {
+        p: data?.usageMetadata?.promptTokenCount || 0,
+        o: data?.usageMetadata?.candidatesTokenCount || 0,
+        th: data?.usageMetadata?.thoughtsTokenCount || 0,
+      }
+      : provider === 'anthropic'
+        ? { p: data?.usage?.input_tokens || 0, o: data?.usage?.output_tokens || 0, th: 0 }
+        : { p: data?.usage?.prompt_tokens || 0, o: data?.usage?.completion_tokens || 0, th: 0 };
+    if (!u.p && !u.o) return;
+    const st = getState();
+    if (!Array.isArray(st.usageLog)) st.usageLog = [];
+    st.usageLog.push({
+      t: Date.now(),
+      r: meta?.roomId || null,
+      k: meta?.mode || meta?.roomType || 'dm',
+      ...u,
+    });
+    if (st.usageLog.length > 400) st.usageLog.splice(0, st.usageLog.length - 400);
+  } catch { /* 記帳失敗不影響回覆 */ }
 }
 
 /* ------------------------------------------------------------
@@ -369,13 +399,16 @@ export function applyOutputRules(text) {
  * ②行內孤立的時間戳括號一律剝除(防誤剝沿 v60 規格:時分「緊接」右括號才算,「(晚上8:30見)」時分後有字不剝)。
  * 用在心聲兩路徑(DM/房內);聊天訊息不需要——那條線有拆條+行首剝除器管。
  */
+// v80:冒號類統一——模型偶發打出視覺幾乎相同的變體冒號 ︰(U+FE30)﹕(U+FE55)∶(U+2236),
+// 舊 [::] 全漏網,名字前綴穿透整條防線(陳以彥實案,截圖佐證)。名字/標籤相關 regex 一律用這組。
+export const COLON_CLS = '[::\uFE30\uFE55\u2236]';
 const TS_INLINE = '[((][^\\n]{0,18}?[\\d0-9]{1,2}\\s*[::][\\d0-9]{2}\\s*[))]';
 export function cutInlineTsRecitation(text, names = []) {
   let out = String(text || '');
   for (const name of (Array.isArray(names) ? names : [names])) {
     const n = String(name || '').trim();
     if (!n) continue;
-    out = out.replace(new RegExp(escapeRegex(n) + '\\s*[::]\\s*' + TS_INLINE + '[\\s\\S]*$'), '');
+    out = out.replace(new RegExp(escapeRegex(n) + '\\s*' + COLON_CLS + '\\s*' + TS_INLINE + '[\\s\\S]*$'), '');
   }
   out = out.replace(new RegExp(TS_INLINE, 'g'), '');
   return out.trim();
@@ -405,10 +438,28 @@ export function stripNamePrefix(text, names = []) {
     .filter(Boolean);
   for (const name of list) {
     const re = new RegExp(
-      `^\\s*[*_「『\\[(]*\\s*${escapeRegex(name)}\\s*[」』\\])*_]*\\s*[::]\\s*`,
+      `^\\s*[*_「『【\\[((]*\\s*${escapeRegex(name)}\\s*[」』】\\]))*_。.]*\\s*${COLON_CLS}\\s*`,
       'gm',
-    );
+    ); // v80:括號類補【】(),冒號改共用類,名字後補剝句點(「名字。:」形態)
     out = out.replace(re, '').replace(re, ''); // 刮兩次，處理「名字：名字：」的怪輸出
+  }
+  // v80(e4):名字模糊剝除第二層——卡名與輸出名不完全一致時(卡名帶表符/空白,或模型用
+  // 簡稱「以彥:」)精確比對漏網。規則:行首「X:」的 X 去掉非中英數字後,與卡名互為包含
+  // 且長度≥2(或完全相等)才剝;「陳媽媽:吃飯了」這種轉述因不包含卡名而保留(有斷言)。
+  const bareOf = (x) => String(x || '').replace(/[^\p{Script=Han}A-Za-z0-9]/gu, '');
+  for (const name of list) {
+    const bn = bareOf(name);
+    if (!bn) continue;
+    out = out.replace(new RegExp(`^[ \t]*([^\n::\uFE30\uFE55\u2236]{1,16}?)[ \t]*${COLON_CLS}[ \t]*`, 'gm'), (m, cand) => {
+      const bc = bareOf(cand);
+      if (!bc) return m;
+      // 三種命中:①正規化後全等(卡名帶表符/空白)②候選是卡名的簡稱(以彥⊂陳以彥)
+      // ③候選=卡名+至多一字(「陳以彥說:」);多兩字以上(「他說陳以彥:」)視為轉述,保留
+      const hit = bc === bn
+        || (bc.length >= 2 && bn.includes(bc))
+        || (bn.length >= 2 && bc.includes(bn) && bc.length <= bn.length + 1);
+      return hit ? '' : m;
+    });
   }
   // v64:名字剝除後再剝一次時間戳——覆蓋「名字:(時間戳)內容」的反向形態
   // (上面先剝 TS 是為「(時間戳)名字:」;兩個方向都要,否則名字剝掉後時間戳浮上行首沒人管)

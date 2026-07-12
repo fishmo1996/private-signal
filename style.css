@@ -1936,3 +1936,11 @@ textarea#composerInput[data-autogrow] { overflow-y: auto; resize: none; }
   margin: 2px 0 8px 40px;
   color: var(--ink-faint);
 }
+
+/* v81:走鐘提示與卡片體檢 */
+.drift-hint { font-size: calc(10.5px * var(--fs-mult)); color: #b45309; margin: 2px 0 0 2px; }
+.card-audit-out { margin-top: 6px; }
+.audit-item { font-size: calc(11px * var(--fs-mult)); padding: 5px 8px; border-radius: 8px; margin-bottom: 4px; }
+.audit-item.warn { background: #fef3c7; color: #92400e; }
+.audit-item.info { background: var(--panel-soft, #eef2ff); color: var(--ink-soft, #4b5563); }
+.audit-item.ok { background: #ecfdf5; color: #065f46; }

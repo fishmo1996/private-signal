@@ -253,6 +253,13 @@ export function buildPrompt({ character, roomId, innerVoiceOf = null }) {
     ...(room.authorNote?.trim()
       ? [`【作者備註(當前對話的最高優先指令，凌駕以上所有設定)】${room.authorNote.trim()}`]
       : []),
+    // v80(e1 尾端三明治):卡片範例若是「名字:(旁白)」劇本格式,模型模仿卡片的力量
+    // 會壓過前面的回覆指令(陳以彥實案:通篇小說腔+名字前綴)。在 system 最末端、
+    // 作者備註之後再釘一行格式重申——離對話越近服從度越高。不與備註衝突:備註管內容,
+    // 這行只管輸出形式。心聲任務不加(它本來就不是訊息格式)。
+    ...(innerVoiceOf ? [] : [promptEn
+      ? '[Format override — outranks any style in the character card or style modules] This is a phone DM. Output ONLY the text messages you type: first person, 1-3 short messages separated by "---"; no narration, no stage directions, no script format, no name prefix.'
+      : '【格式重申|凌駕角色卡與風格模組的任何寫法】這是手機私訊:你的輸出只能是你本人打出來的訊息文字——第一人稱、1~3 則、以「---」分隔;禁止旁白、禁止劇本格式、禁止名字前綴。']),
   ].join('\n\n');
 
   /*
@@ -392,7 +399,7 @@ export function buildPeekPrompt({ roomId }) {
   return {
     system,
     messages: [...recentMessages, { role: 'user', content: '(群組安靜了一陣子，你們之中有人先開口。)' }],
-    meta: { mode: 'peek', maxReplyChars: state.apiConfig?.maxReplyChars?.group || 1200 },
+    meta: { mode: 'peek', maxReplyChars: state.apiConfig?.maxReplyChars?.group || 1200, roomId },
   };
 }
 
@@ -476,7 +483,7 @@ export function buildGroupPrompt({ roomId, mentionName = null, selfTalk = false 
       : []),
   ].join('\n\n');
 
-  return { system, messages: recentMessages, meta: { maxReplyChars, roomType: 'group' } };
+  return { system, messages: recentMessages, meta: { maxReplyChars, roomType: 'group', roomId } };
 }
 
 /** 最近社群動態摘要(公開資訊，所有聊天 prompt 共用)。 */
@@ -644,7 +651,7 @@ export function buildStoryPrompt({ roomId }) {
       : []),
   ].join('\n\n');
 
-  return { system, messages: recentMessages, meta: { maxReplyChars, roomType: 'story', participantCount: participants.length } };
+  return { system, messages: recentMessages, meta: { maxReplyChars, roomType: 'story', participantCount: participants.length, roomId } };
 }
 
 function formatMemories(list, { withRelativeTime = false } = {}) {
@@ -743,7 +750,7 @@ export function buildRoomInnerVoicePrompt({ character, roomId, messageId }) {
     `【任務】以下是${isStory ? '一段正文場景' : '一段群組聊天'}的紀錄(「旁白」是場景敘述)。請寫出紀錄最後那一刻，你(${character.name})心裡真正的想法——這一幕底下你沒說出口的部分(動作洩漏的、語氣藏著的、不敢講的)。第一人稱純內心獨白,100~200 字${isStory ? ',以劇情當下的時空為準，不要提及現實日期' : ''}。不要對任何人喊話、不要引號包裹、不要描述自己的動作、不要任何標記格式。輸出繁體中文。`,
   ].join('\n\n');
 
-  return { system, messages: recentMessages, meta: { maxReplyChars: 300, roomType: room.type, mode: 'innerVoice' } };
+  return { system, messages: recentMessages, meta: { maxReplyChars: 300, roomType: room.type, mode: 'innerVoice', roomId } };
 }
 
 /* ------------------------------------------------------------

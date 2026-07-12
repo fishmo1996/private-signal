@@ -76,6 +76,33 @@ const s10 = splitChatParts('第一則\n---\n甲:第二則', ['甲']);
 t(s10.length === 2 && s10[1] === '第二則', 'v77 拆條後每則行首「名字:」補剝(不要求後跟時間戳)');
 t(splitChatParts('他說甲:你好,我笑了', ['甲'])[0] === '他說甲:你好,我笑了', 'v77 防誤傷:句中轉述「名字:」不剝(僅則首)');
 
+// --- v81:走鐘偵測器+卡片體檢(f1/e3/f2 共用;只偵測不硬剝) ---
+const { assessDmDrift, auditCharacterCard } = await import('../modules/quality.js');
+const novel = '陳以彥:(他放下手中的小泡芙,看著她那張因為不高興而微微撅起的嘴,沉默了兩秒,最終還是無奈地嘆了口氣,隨手將手機擱在桌面上。)\n\n「抱歉。」(他伸手揉了揉她的頭髮,視線卻忍不住掃過她纖細的頸項,聲音變得低沉。)';
+t(assessDmDrift(novel).drifted === true, 'v81 偵測:整坨小說腔(前綴+長括號旁白+無拆條)命中');
+t(assessDmDrift('早安。\n---\n吃飯了嗎?').drifted === false, 'v81 偵測:正常拆條訊息不誤判');
+t(assessDmDrift('(嘆氣)好啦知道了').drifted === false, 'v81 偵測:單一短括號註不誤判(單特徵放行)');
+t(assessDmDrift('嗯。').drifted === false, 'v81 偵測:極短回覆不誤判');
+const aud1 = auditCharacterCard({ name: '陳以彥', systemPrompt: '對話範例:\n陳以彥:(嘆了口氣)「妳又來了。」' });
+t(aud1.some((f) => f.level === 'warn' && f.field === 'systemPrompt'), 'v81 體檢:劇本格式範例掃得出來');
+t(auditCharacterCard({ name: '小安', systemPrompt: '個性直爽,講話簡短。' }).length === 0, 'v81 體檢:乾淨卡片零誤報');
+t(auditCharacterCard({ name: '小安', systemPrompt: '請以第三人稱旁白描寫他的動作神態' }).some((f) => f.level === 'warn'), 'v81 體檢:旁白教學字眼掃得出來');
+
+// --- v80:冒號變體+【】括號補洞、名字模糊剝除(陳以彥實案:v79 仍見「名字:(旁白)」) ---
+for (const colon of [':', ':', '\uFE30', '\uFE55', '\u2236']) {
+  t(!stripNamePrefix(`陳以彥${colon}(他放下手機)`, ['陳以彥']).includes('陳以彥'), `v80 冒號變體 ${JSON.stringify(colon)} 剝掉`);
+}
+t(!stripNamePrefix('【陳以彥】:內容', ['陳以彥']).includes('陳以彥'), 'v80 【】包名剝掉');
+t(!stripNamePrefix('陳以彥。:內容', ['陳以彥']).includes('陳以彥'), 'v80 「名字。:」剝掉');
+t(!stripNamePrefix('以彥:內容', ['陳以彥']).includes('以彥:'), 'v80 模糊:簡稱前綴剝掉');
+t(!stripNamePrefix('陳以彥:內容', ['陳以彥🔥']).includes('陳以彥:'), 'v80 模糊:卡名帶表符也剝');
+t(!stripNamePrefix('陳以彥說:內容', ['陳以彥']).startsWith('陳以彥'), 'v80 模糊:「名字說:」剝掉');
+t(stripNamePrefix('他說陳以彥:你好', ['陳以彥']).startsWith('他說'), 'v80 防誤傷:轉述「他說名字:」保留');
+t(stripNamePrefix('陳媽媽:吃飯了', ['陳以彥']).startsWith('陳媽媽'), 'v80 防誤傷:別人的名字不剝');
+t(stripNamePrefix('10:30 見', ['陳以彥']).startsWith('10:30'), 'v80 防誤傷:時間不剝');
+const v80m = harvestTags('嗨[心情\uFE30🔥]');
+t(v80m.mood === '🔥' && v80m.content === '嗨', 'v80 收割:變體冒號的心情標籤也認');
+
 // --- v76:搜尋快照下限閘門+UI 動詞前綴剝除 ---
 const { sanitizeSearchSnapshot, sanitizeDraftSnapshot } = await import('../modules/phonepeek.js');
 const okSearch = '女友一直撒嬌怎麼辦\n如何控制自己的慾望\nF罩杯內衣尺寸表\n台北 巧克力奶昔\n怎麼緩解想念一個人的焦慮感';

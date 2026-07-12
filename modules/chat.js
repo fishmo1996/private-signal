@@ -9,8 +9,9 @@ import { getCharacter,
   getState, genId, persist, getRoom, getRoomMessages, getRoomCharacters,
 } from './state.js';
 import { buildPrompt, buildGroupPrompt, buildStoryPrompt, buildPeekPrompt, buildRoomInnerVoicePrompt } from './prompt.js';
-import { getApiConfig, generateReply, stripNamePrefix, parseGroupReplies, stripTsPrefix, cutInlineTsRecitation } from './api.js';
+import { getApiConfig, generateReply, stripNamePrefix, parseGroupReplies, stripTsPrefix, cutInlineTsRecitation, COLON_CLS } from './api.js';
 import { extractVoiceTag, harvestTags } from './voice.js';
+import { assessDmDrift, recordDrift } from './quality.js';
 import { anniversaryTextFor } from './album.js';
 import { anniversaryMemoryHits } from './memory.js';
 import { ttsAvailable } from './voice.js';
@@ -301,7 +302,16 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
         notify({ typingBy: character.name });
         const r = await generateReply(cfg, prompt);
         if (r.ok) {
+          // v81(f1/e3):走鐘偵測——用「原始輸出」評估(清潔前才看得到病徵),
+          // 只標記不硬剝(硬剝旁白會毀內容);清潔器出手項目一併進統計。
+          const chatFeelOn = getState().settings.chatFeel !== false;
+          const drift = assessDmDrift(r.text, { chatFeel: chatFeelOn });
+          const fixes = [];
+          if (/^\s*[^\n::\uFE30\uFE55\u2236]{1,16}[::\uFE30\uFE55\u2236]/.test(r.text.trim())) fixes.push('prefix');
+          if (/[。??!!」…))]\s*-{3,}\s*\S/.test(r.text)) fixes.push('inline');
           const md = harvestTags(stripNamePrefix(r.text, [character.name])); // v77:全域收割(行內/尾部標籤皆收,山寨標記照丟)
+          if (md.mood || md.status) fixes.push('tag');
+          recordDrift(getState(), roomId, { drift: drift.drifted, flags: drift.flags, fixes });
           if (md.mood) { room.mood = { emoji: md.mood, at: Date.now() }; }
           applyStatusTag(character, md.status);
           const vt = extractVoiceTag(md.content);
@@ -312,6 +322,7 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
               senderId: character.id,
               content: splitChatParts(vt.content, [character.name]).join('\n') || vt.content,
               ...(vt.voice ? { voice: true } : {}),
+              ...(drift.drifted ? { drift: true } : {}), // e3:UI 掛「走鐘→重新生成」提示
             });
           } else {
             const parts = splitChatParts(vt.content, [character.name]);
@@ -321,7 +332,12 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
                 // eslint-disable-next-line no-await-in-loop
                 await sleep(500 + Math.min(part.length * 12, 900));
               }
-              appendMessage(roomId, { role: 'character', senderId: character.id, content: part });
+              appendMessage(roomId, {
+                role: 'character',
+                senderId: character.id,
+                content: part,
+                ...(drift.drifted && pi === parts.length - 1 ? { drift: true } : {}), // e3:掛在尾則
+              });
               // eslint-disable-next-line no-await-in-loop
               await persist();
               notify({});
@@ -631,7 +647,7 @@ export function splitChatParts(text, names = []) {
   for (const n of (Array.isArray(names) ? names : [names])) {
     if (!n) continue;
     const esc = String(n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    t = t.replace(new RegExp('\\s*-{3,}\\s*' + esc + '\\s*[::]\\s*', 'g'), '\n---\n');
+    t = t.replace(new RegExp('\\s*-{3,}\\s*' + esc + '\\s*' + COLON_CLS + '\\s*', 'g'), '\n---\n');
   }
   t = t.replace(/\s*-{3,}\s*(?=[((][^\n]{0,18}?[\d0-9]{1,2}\s*[::][\d0-9]{2})/g, '\n---\n');
   // v70:無 dash 的行內黏合——「內容。名字:(時間戳)內容」(v64 只防了帶 --- 的形態,模型學會不打 dash)
@@ -639,7 +655,7 @@ export function splitChatParts(text, names = []) {
   for (const n of (Array.isArray(names) ? names : [names])) {
     if (!n) continue;
     const esc = String(n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    t = t.replace(new RegExp(esc + '\\s*[::]\\s*(?=[((][^\\n]{0,18}?[\\d0-9]{1,2}\\s*[::][\\d0-9]{2})', 'g'), '\n---\n');
+    t = t.replace(new RegExp(esc + '\\s*' + COLON_CLS + '\\s*(?=[((][^\\n]{0,18}?[\\d0-9]{1,2}\\s*[::][\\d0-9]{2})', 'g'), '\n---\n');
   }
   // v77:行內通用切分(根源一)——模型這次的形態是「內容---內容」,後面不跟名字也不跟
   // 時間戳,v64/v70 三道防線全繞過→不拆條→尾部標籤被埋在合併大塊中間漏收。
@@ -657,7 +673,7 @@ export function splitChatParts(text, names = []) {
       // 名字前綴補剝:每則開頭的「名字[::]」直接剝,不要求後跟時間戳。
       for (const n of nameList) {
         const escN = n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        p = p.replace(new RegExp('^\\s*' + escN + '\\s*[::]\\s*'), '');
+        p = p.replace(new RegExp('^\\s*' + escN + '\\s*' + COLON_CLS + '\\s*'), '');
       }
       return p.trim();
     })

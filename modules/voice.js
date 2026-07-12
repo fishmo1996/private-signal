@@ -99,7 +99,7 @@ export function stopSpeaking() {
 /** 從 AI 輸出尾端偵測「[心情:x]」標記：回傳 {content, mood}。 */
 export function extractMoodTag(text) {
   const t = String(text || '');
-  const m = t.match(/\n?\s*(?:\[|【)心情[::]\s*(\S{1,4}?)\s*(?:\]|】)\s*$/);
+  const m = t.match(/\n?\s*(?:\[|【)心情[::\uFE30\uFE55\u2236]\s*(\S{1,4}?)\s*(?:\]|】)\s*$/); // v80:冒號變體也認
   if (m) return { content: t.slice(0, m.index).trim(), mood: m[1] };
   return { content: t, mood: null };
 }
@@ -107,7 +107,7 @@ export function extractMoodTag(text) {
 /** 提案 M:從輸出尾偵測「[狀態：一句話]」：回傳 {content, status}。>15 字或空=丟棄但仍剝除。 */
 export function extractStatusTag(text) {
   const t = String(text || '');
-  const m = t.match(/\n?\s*(?:\[|【)狀態[::]\s*([^\]】\n]{0,40}?)\s*(?:\]|】)\s*$/);
+  const m = t.match(/\n?\s*(?:\[|【)狀態[::\uFE30\uFE55\u2236]\s*([^\]】\n]{0,40}?)\s*(?:\]|】)\s*$/); // v80:冒號變體也認
   if (!m) return { content: t, status: null };
   const raw = m[1].trim();
   const status = raw && raw.length <= 15 ? raw : null; // 壞格式寧可丟棄不硬塞
@@ -129,7 +129,7 @@ export function harvestTailTags(text) {
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     const line = lines[i].trim();
     if (!line) { end = i; continue; } // 尾部空行一併收掉
-    const m = line.match(/^(?:\[|\u3010)([^:\uFF1A\]\u3011]{1,6})[:\uFF1A]\s*([^\]\u3011]*?)\s*(?:\]|\u3011)$/); // 冒號/括號全半形皆認(明確碼位)
+    const m = line.match(/^(?:\[|\u3010)([^:\uFF1A\uFE30\uFE55\u2236\]\u3011]{1,6})[:\uFF1A\uFE30\uFE55\u2236]\s*([^\]\u3011]*?)\s*(?:\]|\u3011)$/); // 冒號/括號全半形+變體皆認(v80)
     if (!m) break; // 非標記行:收割結束
     const tag = m[1].trim();
     const val = m[2].trim();
@@ -149,8 +149,8 @@ export function harvestTailTags(text) {
  * 誤吃風險評估:正文要合法出現「[心情:🔥]」這種完整標籤格式幾乎不可能,
  * 一般中括號(如「[不是標記]」)因標籤名不符不受影響(有斷言)。
  */
-const MOOD_TAG_G = /(?:\[|\u3010)\s*心情\s*[:\uFF1A]\s*([^\]\u3011\n]{1,8}?)\s*(?:\]|\u3011)/g;
-const STATUS_TAG_G = /(?:\[|\u3010)\s*狀態\s*[:\uFF1A]\s*([^\]\u3011\n]{0,40}?)\s*(?:\]|\u3011)/g;
+const MOOD_TAG_G = /(?:\[|\u3010)\s*心情\s*[:\uFF1A\uFE30\uFE55\u2236]\s*([^\]\u3011\n]{1,8}?)\s*(?:\]|\u3011)/g; // v80:冒號變體也認
+const STATUS_TAG_G = /(?:\[|\u3010)\s*狀態\s*[:\uFF1A\uFE30\uFE55\u2236]\s*([^\]\u3011\n]{0,40}?)\s*(?:\]|\u3011)/g; // v80:冒號變體也認
 export function harvestTags(text) {
   let t = String(text || '');
   let mood = null;

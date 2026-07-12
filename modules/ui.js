@@ -28,6 +28,7 @@ import {
   initNavigation, isLocked, unlock, getView, navigate, back, parentView,
 } from './navigation.js';
 import { buildLockScreenHTML, buildHomeHTML, clockString, HOME_APPS, DOCK_APPS } from './home.js';
+import { auditCharacterCard, driftSummary } from './quality.js';
 import { compressAvatar, compressBackground, compressPhoto } from './image.js';
 import { getDiaries, generateDiary, deleteDiary } from './diary.js';
 import { getPhotos, addPhoto, updatePhoto, deletePhoto } from './album.js';
@@ -881,6 +882,7 @@ function renderMessages() {
             <div class="voice-transcript">${esc(m.content).replaceAll('\n', '<br>')}</div>${choicesHtml}`
     : `<div class="bubble char-bubble" style="--c:${esc(c ? c.themeColor : '#6b7280')}">${imgHtml}${esc(m.content).replaceAll('\n', '<br>')}</div>${choicesHtml}`}
           ${m.innerVoice ? `<div class="inner-voice" data-iv-card="${esc(m.id)}" hidden>${esc(m.innerVoice).replaceAll('\n', '<br>')}</div>` : ''}
+          ${m.drift ? '<div class="drift-hint">⚠ 這則走鐘了(旁白/劇本腔)——按下方「↻ 重新生成」通常會回魂</div>' : ''}
           <div class="msg-meta">${time}${rememberBtn}</div>
         </div>
       </div>`;
@@ -1876,6 +1878,21 @@ function bindCharCounters(root) {
     input.addEventListener('input', update);
     update();
   });
+  // v81(f2):卡片體檢——讀「表單當下的值」掃描,存檔前就能看結果
+  const auditBtn = root.querySelector('#btnCardAudit');
+  const auditOut = root.querySelector('#cardAuditOut');
+  if (auditBtn && auditOut) {
+    auditBtn.addEventListener('click', () => {
+      const form = auditBtn.closest('form');
+      if (!form) return;
+      const data = Object.fromEntries(new FormData(form).entries());
+      data.alternateGreetings = String(data.alternateGreetings || '').split('\n').filter(Boolean);
+      const findings = auditCharacterCard(data);
+      auditOut.innerHTML = findings.length
+        ? findings.map((f) => `<div class="audit-item ${f.level}">${f.level === 'warn' ? '⚠' : 'ℹ'} ${esc(f.msg)}</div>`).join('')
+        : '<div class="audit-item ok">✓ 沒掃到已知病原:範例格式、旁白教學、超長 systemPrompt 都乾淨</div>';
+    });
+  }
 }
 
 /* ---------------- 設定頁:AI 連線區塊 ---------------- */
@@ -3147,8 +3164,47 @@ function renderDevPanel() {
       角色 ${state.characters.length} · 聊天室 ${state.rooms.length} · 貼文 ${(state.posts || []).length}<br>
       共享記憶 ${state.memories.shared.length} 條
     </div>
+    <div class="mem-heading">token 帳單(v81;近 400 次呼叫滾動)</div>
+    <div class="dev-stats">${usageDashHtml(state)}</div>
+    <div class="mem-heading">走鐘統計(v81;各房近 30 次生成)</div>
+    <div class="dev-stats">${driftDashHtml(state)}</div>
     <div class="mem-heading">buildPrompt 預覽(目前對話)</div>
     ${promptPreview}`;
+}
+
+/** v81(f3):token 帳單摘要 HTML。 */
+function usageDashHtml(state) {
+  const log = state.usageLog || [];
+  if (!log.length) return '(尚無紀錄——下一次真實 API 呼叫開始記帳)';
+  const day0 = new Date(); day0.setHours(0, 0, 0, 0);
+  const sum = (arr) => arr.reduce((a, e) => ({ p: a.p + (e.p || 0), o: a.o + (e.o || 0), th: a.th + (e.th || 0), n: a.n + 1 }), { p: 0, o: 0, th: 0, n: 0 });
+  const fmt = (x) => x.toLocaleString();
+  const today = sum(log.filter((e) => e.t >= +day0));
+  const week = sum(log.filter((e) => e.t >= Date.now() - 7 * 864e5));
+  const byRoom = {};
+  for (const e of log) {
+    const key = e.r || `(${e.k || '其他'})`;
+    byRoom[key] = (byRoom[key] || 0) + (e.p || 0) + (e.o || 0) + (e.th || 0);
+  }
+  const top = Object.entries(byRoom).sort((a, b) => b[1] - a[1]).slice(0, 5)
+    .map(([rid, tk]) => `${esc(getRoom(rid)?.title || rid)}:${fmt(tk)}`).join('<br>');
+  const thShare = week.p + week.o + week.th ? Math.round((week.th / (week.p + week.o + week.th)) * 100) : 0;
+  return `今天:輸入 ${fmt(today.p)} + 輸出 ${fmt(today.o)} + 思考 ${fmt(today.th)}(${today.n} 次)<br>`
+    + `近 7 日:輸入 ${fmt(week.p)} + 輸出 ${fmt(week.o)} + 思考 ${fmt(week.th)}(${week.n} 次)<br>`
+    + `思考佔比(7日):${thShare}%${thShare > 30 ? ' ← thinkingBudget 是最大省錢旋鈕' : ''}<br>`
+    + `最燒的對象:<br>${top}`;
+}
+
+/** v81(f1):走鐘統計摘要 HTML。 */
+function driftDashHtml(state) {
+  const rows = driftSummary(state).slice(0, 6);
+  if (!rows.length) return '(尚無紀錄——DM 每次真實生成都會計入)';
+  const fixName = { prefix: '剝前綴', inline: '拆黏條', tag: '收埋藏標籤' };
+  return rows.map((r) => {
+    const fixes = Object.entries(r.fixCounts).map(([k, v]) => `${fixName[k] || k}×${v}`).join('、') || '無';
+    return `${esc(getRoom(r.roomId)?.title || r.roomId)}:走鐘 ${Math.round(r.driftRate * 100)}%(${r.n} 次)· 清潔器出手:${fixes}`;
+  }).join('<br>')
+    + '<br><span class="panel-note">卡片體檢+改卡後,看這裡的數字有沒有降;promptLang A/B 也看這裡。</span>';
 }
 
 /* ---------------- Modal ---------------- */
@@ -3256,7 +3312,9 @@ function characterFormFields(c = {}) {
       <label class="field half">主題色
         <input type="color" name="themeColor" value="${esc(c.themeColor || '#8ea7ff')}">
       </label>
-    </div>`;
+    </div>
+    <button type="button" class="mini-btn" id="btnCardAudit">🩺 卡片體檢(掃劇本格式等 DM 走鐘病原)</button>
+    <div id="cardAuditOut" class="card-audit-out"></div>`;
 }
 
 function readForm(form) {
