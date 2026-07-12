@@ -10,7 +10,7 @@ import { getCharacter,
 } from './state.js';
 import { buildPrompt, buildGroupPrompt, buildStoryPrompt, buildPeekPrompt, buildRoomInnerVoicePrompt } from './prompt.js';
 import { getApiConfig, generateReply, stripNamePrefix, parseGroupReplies, stripTsPrefix, cutInlineTsRecitation } from './api.js';
-import { extractVoiceTag, harvestTailTags } from './voice.js';
+import { extractVoiceTag, harvestTags } from './voice.js';
 import { anniversaryTextFor } from './album.js';
 import { anniversaryMemoryHits } from './memory.js';
 import { ttsAvailable } from './voice.js';
@@ -301,7 +301,7 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
         notify({ typingBy: character.name });
         const r = await generateReply(cfg, prompt);
         if (r.ok) {
-          const md = harvestTailTags(stripNamePrefix(r.text, [character.name])); // v71:不限順序收割尾部標記
+          const md = harvestTags(stripNamePrefix(r.text, [character.name])); // v77:全域收割(行內/尾部標籤皆收,山寨標記照丟)
           if (md.mood) { room.mood = { emoji: md.mood, at: Date.now() }; }
           applyStatusTag(character, md.status);
           const vt = extractVoiceTag(md.content);
@@ -604,7 +604,8 @@ export async function generateInnerVoice(roomId, messageId, characterId = null) 
       if (!r.ok) return { ok: false, message: r.message };
       text = stripNamePrefix(r.text, [character.name]).trim();
       text = cutInlineTsRecitation(text, [character.name]); // v76:行內「名字:(時間戳)」截尾+孤立時間戳剝除(心聲不走拆條,v70 防線管不到)
-      if (!text) return { ok: false, message: '模型回傳了空內容，再按一次試試' };
+      text = harvestTags(text).content; // v77(根源一):心聲同樣先過標籤抽取——[心情:x] 曾污染心聲卡只剩純 emoji(擁有者截圖);心聲的心情/狀態一律丟棄不落地
+      if (!text) return { ok: false, message: '心聲生成失敗(內容被剝乾淨了),請再按一次重試' };
     } else {
       text = '(嘴上說得輕鬆，其實剛剛心跳快得不像話。希望沒被發現。)';
     }
@@ -640,9 +641,26 @@ export function splitChatParts(text, names = []) {
     const esc = String(n).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     t = t.replace(new RegExp(esc + '\\s*[::]\\s*(?=[((][^\\n]{0,18}?[\\d0-9]{1,2}\\s*[::][\\d0-9]{2})', 'g'), '\n---\n');
   }
+  // v77:行內通用切分(根源一)——模型這次的形態是「內容---內容」,後面不跟名字也不跟
+  // 時間戳,v64/v70 三道防線全繞過→不拆條→尾部標籤被埋在合併大塊中間漏收。
+  // 保守規格(擁有者核准):--- 前必須是句末標點(。?!?」…))才轉,DM 沒有 markdown
+  // 分隔線需求,誤切風險低;「型號A---B」這類非句末形態不切(有斷言)。
+  // 注意順序:必須排在 v64/v70 的「---名字:」「---(時間戳)」轉換之後,否則會先吃掉
+  // ---,讓名字/時間戳漏出到訊息開頭。
+  t = t.replace(/([。??!!」…))])\s*-{3,}\s*/g, '$1\n---\n');
+  const nameList = (Array.isArray(names) ? names : [names]).filter(Boolean).map((n) => String(n).trim()).filter(Boolean);
   return t
     .split(/\n\s*-{3,}\s*\n?|^\s*-{3,}\s*$/m)
-    .map((tt) => stripTsPrefix(tt).trim()) // v62:拆條後每則再剝一次時間戳
+    .map((tt) => {
+      let p = stripTsPrefix(tt).trim(); // v62:拆條後每則再剝一次時間戳
+      // v77(根源三):拆條會改變行首,行首錨定的剝除器要再跑一次(v62/v64 通則)——
+      // 名字前綴補剝:每則開頭的「名字[::]」直接剝,不要求後跟時間戳。
+      for (const n of nameList) {
+        const escN = n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        p = p.replace(new RegExp('^\\s*' + escN + '\\s*[::]\\s*'), '');
+      }
+      return p.trim();
+    })
     .filter(Boolean)
     .slice(0, 3);
 }
@@ -814,7 +832,7 @@ export async function refreshChats(opts = {}) {
   }
   if (!content) return { ok: true };
 
-  const mdP = harvestTailTags(content); // v71:不限順序收割尾部標記
+  const mdP = harvestTags(content); // v77:全域收割(行內/尾部標籤皆收)
   if (mdP.mood) { room.mood = { emoji: mdP.mood, at: Date.now() }; }
   applyStatusTag(character, mdP.status);
   const vtP = extractVoiceTag(mdP.content);

@@ -23,6 +23,7 @@ export function getApiConfig() {
     state.apiConfig = defaultApiConfig();
   }
   if (state.apiConfig.secondaryModel === undefined) state.apiConfig.secondaryModel = '';
+  if (state.apiConfig.promptLang === undefined) state.apiConfig.promptLang = 'zh'; // v78:指令骨架語言
   return state.apiConfig;
 }
 
@@ -40,6 +41,7 @@ export function defaultApiConfig() {
     temperature: 1.0,            // 溫度：創作建議 0.9~1.2
     topP: 0.95,
     thinkingBudget: '',          // Gemini 思考預算：留空=模型預設,0=關閉思考(省額度)
+    promptLang: 'zh',            // v78:固定回覆指令的骨架語言 'zh'|'en'(en=實驗,省指令 token;內容血肉一律中文)
     safetyLevel: 'default',      // Gemini 內容安全:default | relaxed | none(官方 safetySettings 參數)
     presets: [null, null, null], // P1~P3:{name, provider, apiKey, model, baseUrl}
   };
@@ -177,7 +179,8 @@ export function buildChatRequest(cfg, { system, messages, meta }) {
         }),
         ...(cfg.safetyLevel && cfg.safetyLevel !== 'default' ? {
           safetySettings: ['HARM_CATEGORY_HARASSMENT', 'HARM_CATEGORY_HATE_SPEECH',
-            'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'HARM_CATEGORY_DANGEROUS_CONTENT']
+            'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'HARM_CATEGORY_DANGEROUS_CONTENT',
+            'HARM_CATEGORY_CIVIC_INTEGRITY'] // v77:補齊全類別(官方文件的第五類)
             .map((category) => ({
               category,
               threshold: cfg.safetyLevel === 'none' ? 'BLOCK_NONE' : 'BLOCK_ONLY_HIGH',
@@ -304,6 +307,22 @@ export async function generateReply(cfg, prompt, opts = {}) {
         return { ok: false, message: lastMessage };
       }
       const data = await res.json();
+      // v77(根源二):安全攔截誤報修正——Gemini 被安全過濾攔下時回空 candidate 或
+      // finishReason=SAFETY/blockReason,舊碼統一誤報成「格式不合」,誤導使用者無效重按
+      // 五次(擁有者實案)。這裡辨識真實原因、回明確錯誤型別(blocked:true),重試無效的
+      // 情況不再引導無腦重按。
+      if (cfg.provider === 'gemini') {
+        const blockReason = data?.promptFeedback?.blockReason || '';
+        const finishReason = data?.candidates?.[0]?.finishReason || '';
+        const BLOCKED_FINISH = new Set(['SAFETY', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII', 'IMAGE_SAFETY']);
+        if (blockReason || BLOCKED_FINISH.has(finishReason)) {
+          return {
+            ok: false,
+            blocked: true,
+            message: `被供應商的安全過濾攔下(${blockReason || finishReason};非格式問題,重按不會有效)。可以:到 API 設定調寬「內容安全等級」,或改寫最近一句再送。`,
+          };
+        }
+      }
       const text = extractReplyText(cfg.provider, data).trim();
       if (!text) return { ok: false, message: '這一則被模型服務暫時擋下(內容審查誤判或長度不足),再試一次通常就好——與你的內容無關。' };
       const cap = prompt.meta?.maxReplyChars || 800;
@@ -405,7 +424,8 @@ export function stripNamePrefix(text, names = []) {
 export function parseGroupReplies(text, participants, maxReplies = 3) {
   const names = participants.map((c) => c.name);
   let raw = String(text || '').trim()
-    .replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    .replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
+    .replace(/```(?:json)?/gi, ''); // v77:圍欄不在頭尾(前後夾廢話)也剝乾淨
   const start = raw.indexOf('[');
   const end = raw.lastIndexOf(']');
   if (start !== -1 && end > start) raw = raw.slice(start, end + 1);
@@ -428,6 +448,34 @@ export function parseGroupReplies(text, participants, maxReplies = 3) {
       rescued.push({ name: m[1], content });
     }
     if (rescued.length) items = rescued;
+  }
+
+  // v77(根源二):平衡大括號救援第二層——正則層要求 name 在 content 前,模型把鍵序
+  // 顛倒({"content":…,"name":…})或漏掉外層 [] 時撈不到。這裡逐字掃描抽出頂層平衡的
+  // {…} 區塊(字串內的大括號不誤認),各自 JSON.parse;能撈幾則是幾則。
+  if (!items) {
+    const objs = [];
+    let depth = 0; let start = -1; let inStr = false; let escNext = false;
+    for (let i = 0; i < raw.length; i += 1) {
+      const ch = raw[i];
+      if (escNext) { escNext = false; continue; }
+      if (ch === '\\') { escNext = true; continue; }
+      if (ch === '"') inStr = !inStr;
+      if (inStr) continue;
+      if (ch === '{') { if (depth === 0) start = i; depth += 1; }
+      else if (ch === '}') {
+        depth = Math.max(0, depth - 1);
+        if (depth === 0 && start !== -1) { objs.push(raw.slice(start, i + 1)); start = -1; }
+      }
+    }
+    const rescued2 = [];
+    for (const o of objs) {
+      try {
+        const p = JSON.parse(o.replace(/\r?\n/g, '\\n'));
+        if (p && typeof p.content === 'string') rescued2.push({ name: String(p.name || ''), content: p.content });
+      } catch { /* 這一塊救不回就跳過 */ }
+    }
+    if (rescued2.length) items = rescued2;
   }
 
   if (!items) {

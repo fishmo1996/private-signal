@@ -56,6 +56,26 @@ t(cutInlineTsRecitation('約好了(7/8(週三) 14:57)見面', []) === '約好了
 t(cutInlineTsRecitation('(晚上8:30見)再說', ['甲']) === '(晚上8:30見)再說', '心聲:防誤剝(時分後有字不剝,v60 規格)');
 t(cutInlineTsRecitation('他心裡想著甲:你好', ['甲']) === '他心裡想著甲:你好', '心聲:「名字:」後無時間戳不截(一般轉述不誤傷)');
 
+// --- v77(根源一):全域標籤收割+行內通用切分 ---
+const { harvestTags } = await import('../modules/voice.js');
+const g1 = harvestTags('A。---B[心情:🔥]');
+t(g1.mood === '🔥' && !g1.content.includes('心情'), 'v77 收割:埋在行內的 [心情:🔥] 全域抽走');
+const g1s = splitChatParts(g1.content, ['甲']);
+t(g1s.length === 2 && g1s[0] === 'A。' && g1s[1] === 'B', 'v77 驗收:「A。---B[心情:🔥]」→ 兩則氣泡+無標籤殘留');
+const g2 = harvestTags('聊到一半[狀態:在練團]還沒完\n[心情:🔥]');
+t(g2.status === '在練團' && g2.mood === '🔥' && g2.content === '聊到一半還沒完', 'v77 收割:行中 [狀態] 也抽走,尾部心情照收');
+const g3 = harvestTags('中括號[不是標記]在正文裡\n[好感度:87]');
+t(g3.content === '中括號[不是標記]在正文裡' && !g3.mood && !g3.status, 'v77 收割:正文一般中括號不誤吃、尾部山寨標記照丟');
+const s8 = splitChatParts('真的要我抱著妳一起嗎?---少在那邊裝傻。');
+t(s8.length === 2 && s8[1] === '少在那邊裝傻。', 'v77 行內通用切分:句末標點後的 ---(不跟名字不跟時間戳)也切');
+t(splitChatParts('型號A---B不該被拆').length === 1, 'v77 防誤切:非句末標點後的行內 --- 不切');
+t(splitChatParts('這是——破折號的內文——不該被拆。').length === 1, 'v77 防誤切:破折號「——」迴歸不誤傷');
+
+// --- v77(根源三):拆條後行首名字前綴補剝(拆條改變行首,行首錨定剝除器要再跑一次) ---
+const s10 = splitChatParts('第一則\n---\n甲:第二則', ['甲']);
+t(s10.length === 2 && s10[1] === '第二則', 'v77 拆條後每則行首「名字:」補剝(不要求後跟時間戳)');
+t(splitChatParts('他說甲:你好,我笑了', ['甲'])[0] === '他說甲:你好,我笑了', 'v77 防誤傷:句中轉述「名字:」不剝(僅則首)');
+
 // --- v76:搜尋快照下限閘門+UI 動詞前綴剝除 ---
 const { sanitizeSearchSnapshot, sanitizeDraftSnapshot } = await import('../modules/phonepeek.js');
 const okSearch = '女友一直撒嬌怎麼辦\n如何控制自己的慾望\nF罩杯內衣尺寸表\n台北 巧克力奶昔\n怎麼緩解想念一個人的焦慮感';

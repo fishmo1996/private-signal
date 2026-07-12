@@ -173,14 +173,57 @@ export function buildPrompt({ character, roomId, innerVoiceOf = null }) {
     ?? 800; // 未知房型防禦：退回 DM 規格，絕不輸出 undefined
 
   /* --- 回覆風格指令 --- */
+  // v77(根源三):DM 指令瘦身——原版與聊天感段重複陳述「第一人稱/口語/像打字」三處以上,
+  // 重寫為不重複的緊湊版,語意不變(重複=token 浪費且稀釋服從度)。
+  // v78:指令骨架語言開關(apiConfig.promptLang 'zh'|'en',預設 zh)。英文骨架省指令
+  // token 且格式服從度較好;台詞錨、作者備註、世界書等「內容血肉」一律保持中文。
+  // ★兩版語意必須同步:改任何一版的規則,另一版要跟著改(標記格式 [心情:x] 等不翻譯,
+  // 輸出端收割器認的是中文標籤)。英文版結尾兩條硬規則必留:繁中輸出+「」引號。
+  const promptEn = state.apiConfig?.promptLang === 'en' && room.type === 'dm';
   const styleGuide = ({
-    dm: '風格：私訊。短訊息、自然、口語，像手機上打字。一到兩句即可。以角色第一人稱直接輸出內容，絕對不要在開頭加上自己的名字或「名字：」前綴。',
+    dm: '風格：私訊。你正在手機上打字回訊息：第一人稱、口語、精短。行首絕不加自己的名字或「名字：」前綴。',
     group: '風格：群組聊天。自然節奏，不必每人每回合都發言；可補充、吐槽、接話或延後回覆。',
     story: '風格：互動敘事，以小說筆法輸出：場景描述、動作、心理與對話交織。對話用引號呈現，不要用「名字：台詞」的劇本格式，也不要在開頭加名字前綴。',
   }[room.type] ?? '風格：私訊。短訊息、自然、口語。')
   + (room.type === 'story' && state.settings?.storyFormat?.trim()
     ? ` ${state.settings.storyFormat.trim()}`
     : '');
+
+  const dmReplyGuideZh = `【回覆指令】${styleGuide} ${
+  state.settings?.chatFeel !== false
+    ? '把回覆拆成 1~3 則短訊息(每則 ≤100 字),訊息之間用單獨一行「---」分隔,「---」不可寫在句子中間。禁止第三人稱旁白與神態描寫；偶爾必要時才用括號短註，只寫你此刻真正在做的事，不要固定口頭禪式的重複動作。'
+    : ''
+} emoji 預設節制:多數訊息不帶表符,偶爾在情緒真的需要時用一個;若上面有【Emoji 習慣】則完全以其為準。無論如何禁止使用 😏(除非 Emoji 習慣裡明確要求)。${
+  state.settings?.voiceTag !== false && !character.noPhone
+    ? '如果這則訊息更適合「用說的」(情緒濃的時刻、撒嬌、慵懶的晚安、哼一句歌),在訊息最開頭加上標記[語音]——大約一成的時機，別常用。'
+    : ''
+}${
+  state.settings?.moodEmoji !== false && !character.noPhone
+    ? ' 在整段輸出的最後另起一行加上「[心情:x]」,x 是最能代表你此刻對玩家心情的一個 emoji。'
+    : ''
+}${
+  state.settings?.charStatus !== false && !character.noPhone
+    ? ' 另外，你在通訊軟體上掛著一個所有人可見的狀態(像個性簽名)。僅在這次對話讓你的狀態「確實會改變」時，才在輸出最後另起一行加上「[狀態：一句話]」(15 字內)——多數回覆不需要。狀態是公開的，絕不可包含只有你和玩家兩人知道的私密細節。'
+    : ''
+}${room.type === 'dm' && state.settings?.chatFeel !== false ? '' : ` 單則回覆長度上限約 ${maxReplyChars} 字。`}`;
+
+  // v78 英文版:與中文版逐段同語意(含設定開關條件),不是照抄交接文件——文件版把
+  // [心情][狀態] 寫死且漏了 [語音],照抄會讓設定開關在英文模式下失效。
+  const dmReplyGuideEn = '【Reply Rules】'
+    + (state.settings?.chatFeel !== false
+      ? 'You are texting as this character in a real messaging app. First person, casual, like typing on a phone. Send 1-3 short messages (each ≤100 Chinese characters), separated by a line containing only "---"; never put "---" mid-sentence. Never prefix your own name. No third-person narration or stage directions; a brief parenthetical only for what you are actually doing right now — no habitual filler actions.'
+      : `Reply as one message: first person, casual, like typing on a phone, within about ${maxReplyChars} Chinese characters. Never prefix your own name; no third-person narration or stage directions.`)
+    + ' Emoji: sparing — most messages carry none; never 😏. If an【Emoji 習慣】section exists above, follow it exactly.'
+    + (state.settings?.voiceTag !== false && !character.noPhone
+      ? ' If a message is better spoken than typed (charged emotion, a sleepy goodnight, humming a line), start that message with the tag [語音] — at most about 1 in 10 messages.'
+      : '')
+    + (state.settings?.moodEmoji !== false && !character.noPhone
+      ? ' End the whole output with a new line "[心情:x]" (x = ONE emoji for your current feeling toward the player).'
+      : '')
+    + (state.settings?.charStatus !== false && !character.noPhone
+      ? ' Add a new line "[狀態:...]" (≤15 Chinese characters, publicly visible, never private details only you two share) ONLY if this exchange truly changes your public status — most replies do not.'
+      : '')
+    + ' Reply ONLY in Traditional Chinese (Taiwan). Use 「」 for quoted speech.';
 
   const system = [
     ...globalPromptSection(roomId),
@@ -206,23 +249,7 @@ export function buildPrompt({ character, roomId, innerVoiceOf = null }) {
     `【其他介面中,${character.name} 可知曉的近期內容】\n${formatCross(crossContext)}`,
     innerVoiceOf
       ? '【任務】以下不是要你回覆對話：請寫出你剛才說出最後那則訊息的「當下」，心裡真正的想法——表面沒說出口的部分(動作洩漏的、語氣藏著的、不敢講的)。第一人稱純內心獨白,100~200 字；不要對玩家喊話、不要寫你接下來要說的話或任何新的訊息、不要引號包裹、不要描述自己的動作、不要以日期或時間開頭、不要任何標記格式。輸出繁體中文。'
-      : `【回覆指令】${styleGuide} ${
-  state.settings?.chatFeel !== false
-    ? '以真實聊天軟體的口吻回覆：第一人稱、口語、像在打字。把回覆拆成 1~3 則短訊息(每則不超過 100 字),訊息之間用單獨一行「---」分隔。絕對不要第三人稱旁白敘事(不要寫「他抓了抓頭髮」這種)。動作或神態通常不用寫——真人打字很少描述自己的動作；偶爾需要時才用括號短註，而且要貼合你當下真實在做的事，不要有固定口頭禪式的重複動作。'
-    : ''
-} emoji 預設節制:多數訊息不帶表符,偶爾在情緒真的需要時用一個;若上面有【Emoji 習慣】則完全以其為準。無論如何禁止使用 😏(除非 Emoji 習慣裡明確要求)。${
-  state.settings?.voiceTag !== false && !character.noPhone
-    ? '如果這則訊息更適合「用說的」(情緒濃的時刻、撒嬌、慵懶的晚安、哼一句歌),在訊息最開頭加上標記[語音]——大約一成的時機，別常用。'
-    : ''
-}${
-  state.settings?.moodEmoji !== false && !character.noPhone
-    ? ' 在整段輸出的最後另起一行加上「[心情:x]」,x 是最能代表你此刻對玩家心情的一個 emoji。'
-    : ''
-}${
-  state.settings?.charStatus !== false && !character.noPhone
-    ? ' 另外，你在通訊軟體上掛著一個所有人可見的狀態(像個性簽名)。僅在這次對話讓你的狀態「確實會改變」時，才在輸出最後另起一行加上「[狀態：一句話]」(15 字內)——多數回覆不需要。狀態是公開的，絕不可包含只有你和玩家兩人知道的私密細節。'
-    : ''
-} 單則回覆長度上限約 ${maxReplyChars} 字。`,
+      : (promptEn ? dmReplyGuideEn : dmReplyGuideZh),
     ...(room.authorNote?.trim()
       ? [`【作者備註(當前對話的最高優先指令，凌駕以上所有設定)】${room.authorNote.trim()}`]
       : []),
@@ -305,6 +332,38 @@ export function buildPeekPrompt({ roomId }) {
     `  個性:${c.personality || '(未提供)'}`,
     c.emojiStyle?.trim() && !c.noPhone ? `  Emoji 習慣:${c.emojiStyle.trim()}` : '',
   ].filter(Boolean));
+
+  // v79(d2):共同在場的群聊注入——只帶「全體旁觀成員都在場」的一般群聊(他們親身
+  // 經歷過的內容),依最近活躍取 2 房、各尾端 6 則、每則截 60 字。DM/正文/其他旁觀房
+  // 一律不進(隱私鐵律不動;正文=擁有者選擇不帶,劇情時間與現實脫鉤)。部分成員在場
+  // 的群也不帶——避免「不在場的人知道了群內容」這種穿幫(有隱私測試把關)。
+  const witnessedGroups = state.rooms
+    .filter((r) => r.type === 'group' && !r.branchedFrom
+      && participants.every((c) => r.participantIds.includes(c.id)))
+    .map((r) => ({ room: r, msgs: getRoomMessages(r.id) }))
+    .filter((g) => g.msgs.length)
+    .sort((x, y) => (y.msgs[y.msgs.length - 1]?.createdAt || 0) - (x.msgs[x.msgs.length - 1]?.createdAt || 0))
+    .slice(0, 2)
+    .map(({ room: r, msgs }) => {
+      const pName = personaForRoom(r)?.name || '玩家';
+      const lines = msgs.slice(-6).map((m) => {
+        const who = m.senderId === 'player' || m.role === 'user'
+          ? pName
+          : (state.characters.find((c) => c.id === m.senderId)?.name || '成員');
+        const body = String(m.content || '').length > 60 ? `${String(m.content).slice(0, 60)}…` : String(m.content || '');
+        return `  ‣ ${who}:${body}`;
+      });
+      return `「${r.title}」(${pName} 也在這個群):\n${lines.join('\n')}`;
+    });
+
+  // v79(d3):各成員對玩家的關係階段(取各自 DM 主線房的 relationshipStage)——
+  // 這是他們各自心裡的立場,注入後八卦的態度會穩(暗戀的閃躲、看不順眼的嗆)。
+  const stageLines = participants.map((c) => {
+    const dm = state.rooms.find((r) => r.type === 'dm' && !r.branchedFrom && r.participantIds.includes(c.id));
+    const st = dm?.relationshipStage?.trim();
+    return st ? `- ${c.name}:${st}` : '';
+  }).filter(Boolean);
+
   const system = [
     ...globalPromptSection(roomId),
     `這是「${room.title}」——以下角色們自己的私下群組。`,
@@ -315,8 +374,12 @@ export function buildPeekPrompt({ roomId }) {
     `【關於「${personaP?.name || '那個人'}」你們知道的】${personaP?.description?.trim() || '(所知不多)'}`,
     '【務實原則】聊到這個人時，只根據上面的資料、共享記憶與這個群裡聊過的內容;'
     + '不知道的事可以用猜的口吻(「不知道他最近在幹嘛」),但不要編造沒發生過的具體事件。',
+    ...(stageLines.length ? [
+      `【各自對「${personaP?.name || '那個人'}」目前的關係階段(每人自己心裡的立場;會影響你講到這個人時的語氣與態度,但絕不要把這欄唸出來或明講階段)】\n${stageLines.join('\n')}`,
+    ] : []),
     `【共享記憶(大家都知道的事)】\n${formatMemories(sharedMemories)}`,
-    ...(participants.every((c) => c.noPhone) ? [] : [`【最近的社群動態(公開)】\n${recentFeedText(state, personaP?.id)}`]),
+    ...(participants.every((c) => c.noPhone) ? [] : [`【最近的社群動態(公開,含留言)】\n${recentFeedDetailText(state, personaP?.id)}`]),
+    ...(witnessedGroups.length ? [`【你們都在場的群組最近聊到(你們親身經歷過的)】\n${witnessedGroups.join('\n')}`] : []),
     ...nowSection(getRoomMessages(roomId).slice(-1)[0]?.createdAt || null),
     ...(loreLines.length ? [`【世界設定】\n${loreLines.join('\n')}`] : []),
     '【自聊指令】從共同知道的事挑話題聊 2~5 則，有來有往，可以互虧、歪樓、八卦不在場的人。',
@@ -398,10 +461,16 @@ export function buildGroupPrompt({ roomId, mentionName = null, selfTalk = false 
       + '2~5 則，有來有往，可以互虧、可以歪樓；不要對玩家喊話，也不要代替玩家發言。',
     ] : []),
     ...(mentionName ? [`【點名】玩家在訊息中 @ 了「${mentionName}」：他必須回應；其他人可以補充，也可以不出聲。`] : []),
-    `【輸出格式】只輸出 JSON 陣列，不要任何其他文字或 markdown 圍欄:`
+    state.apiConfig?.promptLang === 'en' // v78:骨架語言開關(內容血肉仍中文;兩版語意必須同步)
+      ? '【Output Format】Output ONLY a JSON array — no other text, no markdown fences: '
+        + '[{"name":"角色名","content":"訊息內容"}]. '
+        + '1 to 3 items; chat naturally like a real group — not everyone has to speak. '
+        + 'Each "content" is phone-texting tone, ≤100 Chinese characters, no name prefix inside content. '
+        + 'All "content" must be in Traditional Chinese (Taiwan). Use 「」 for quoted speech.'
+      : `【輸出格式】只輸出 JSON 陣列，不要任何其他文字或 markdown 圍欄:`
       + `[{"name":"角色名","content":"訊息內容"}]。`
       + `1 到 3 則；像真實群聊一樣自然接話，不必每個角色都發言;`
-      + `content 是手機短訊口吻，單則不超過 ${maxReplyChars} 字，不要在內容裡加名字前綴。`,
+      + `content 是手機短訊口吻，每則 ≤100 字，不要在內容裡加名字前綴。`,
     ...(room.authorNote?.trim()
       ? [`【作者備註(當前對話的最高優先指令，凌駕以上所有設定)】${room.authorNote.trim()}`]
       : []),
@@ -451,6 +520,37 @@ function recentFeedText(state, personaId = null, limit = 4) {
 }
 
 /**
+ * v79(d1):社群素材加料版——僅旁觀群使用(其他房維持 recentFeedText 省 token)。
+ * 旁觀群的八卦素材以前只有「4 篇×截 40 字、零留言」,但角色跟玩家的互動大多發生在
+ * 留言區 → 他們剛在留言區聊完、轉頭進旁觀群卻全盲(擁有者實測「銜接不上」)。
+ * 這版帶:最近 3 篇較完整內文(截 120 字)+每篇尾端 4 則留言(含誰回覆誰,截 60 字)。
+ * 圈子隔離規則與 recentFeedText 完全相同。
+ */
+function recentFeedDetailText(state, personaId = null, { limit = 3, postChars = 120, cmtCount = 4, cmtChars = 60 } = {}) {
+  const pid = personaId || state.defaultPersonaId;
+  const circleOfPost = (pp) => pp.personaId
+    || (pp.authorId !== 'player'
+      ? (state.characters.find((c) => c.id === pp.authorId)?.knownPersonaId || state.defaultPersonaId)
+      : null);
+  const nameOf = (authorId, cPersonaId) => (authorId === 'player'
+    ? (getPersona(cPersonaId)?.name || '玩家')
+    : (state.characters.find((c) => c.id === authorId)?.name || '?'));
+  const posts = (state.posts || [])
+    .filter((pp) => { const cir = circleOfPost(pp); return !cir || cir === pid; })
+    .slice(0, limit);
+  if (!posts.length) return '(目前沒有動態)';
+  return posts.map((p) => {
+    const text = p.content.length > postChars ? `${p.content.slice(0, postChars)}…` : p.content;
+    const cms = ((state.commentsByPostId || {})[p.id] || []).slice(-cmtCount).map((cm) => {
+      const body = cm.content.length > cmtChars ? `${cm.content.slice(0, cmtChars)}…` : cm.content;
+      const target = cm.replyTo?.name ? `(回覆 ${cm.replyTo.name})` : '';
+      return `  ‣ ${nameOf(cm.authorId, cm.personaId)}${target}:${body}`;
+    });
+    return `- ${nameOf(p.authorId, p.personaId)}:${text}${p.image ? '(附圖)' : ''}${cms.length ? `\n${cms.join('\n')}` : ''}`;
+  }).join('\n');
+}
+
+/**
  * 正文專用 prompt:全員說書人視角(開放世界引擎)。
  * 隱私規則同群聊：只含在場者的公開資料 + 共享/場景記憶 + 世界書，絕不含私密記憶。
  */
@@ -494,20 +594,27 @@ export function buildStoryPrompt({ roomId }) {
     c.systemPrompt ? `  指令:${c.systemPrompt}` : '',
   ].filter(Boolean).join('\n')).join('\n');
 
+  const promptEnS = state.apiConfig?.promptLang === 'en'; // v78:骨架語言(兩版語意必須同步)
   const choiceGuide = state.settings?.storyChoices
-    ? '敘事結束後，另起新行以「▷」開頭列出 2~3 個玩家可採取的行動選項(每個一行,10 字內);選項要有差異，玩家也可以無視選項自行輸入。'
+    ? (promptEnS
+      ? 'After the narration, on new lines list 2-3 possible player actions, each line starting with "▷" (≤10 Chinese characters each); make them distinct — the player may also ignore them and type freely.'
+      : '敘事結束後，另起新行以「▷」開頭列出 2~3 個玩家可採取的行動選項(每個一行,10 字內);選項要有差異，玩家也可以無視選項自行輸入。')
     : '';
-  const styleGuide = '風格：互動敘事，你是這個場景的說書人，以小說筆法同時推進所有在場角色：場景描述、動作、心理與對話交織。'
+  const styleGuide = (promptEnS
+    ? 'Style: interactive fiction. You are the storyteller of this scene, advancing all present characters with novelistic prose: setting, action, interiority and dialogue interwoven. '
+      + 'Dialogue inside 「」 quotes — never script format like "名字:台詞", never name prefixes. '
+      + 'Walk-on NPCs (clerks, passersby, drivers) may enter naturally, but never speak for established characters who are not present.'
+    : '風格：互動敘事，你是這個場景的說書人，以小說筆法同時推進所有在場角色：場景描述、動作、心理與對話交織。'
     + '對話用「」引號呈現，不要「名字：台詞」的劇本格式，不要名字前綴。'
-    + '允許引入未事先定義的路人與臨時 NPC(店員、路人、司機等),自然登場即可；但不要替不在場的既有角色代言。'
-    + (state.settings?.storyFormat?.trim() ? ` ${state.settings.storyFormat.trim()}` : '');
+    + '允許引入未事先定義的路人與臨時 NPC(店員、路人、司機等),自然登場即可；但不要替不在場的既有角色代言。')
+    + (state.settings?.storyFormat?.trim() ? ` ${state.settings.storyFormat.trim()}` : ''); // 使用者 storyFormat=內容血肉,原樣附加不翻譯
 
   // 內建導演指令：英文寫(省 token、服從度佳),單/多人自動切換配方;
   // 使用者的 storyFormat 與作者備註排在其後，永遠優先。
   const directorCommon = 'Anchor the passage in one concrete sensory detail (touch, sound, scent): establish it early, return to it at the end.'
     + ' Never write lazy summary lines like 「他沉默了」or「一陣停頓」— render silence and pauses through concrete description.'
     + " Stay strictly in the player's POV; describe only what they can perceive."
-    + ' Dialogue in natural Taiwanese Mandarin. Write roughly 1000–2000 Chinese characters per reply; unfold the scene patiently, do not rush the plot or wrap up early.'
+    + ` Dialogue in natural Taiwanese Mandarin. Write roughly ${Math.round(maxReplyChars * 0.6)}–${maxReplyChars} Chinese characters per reply; unfold the scene patiently, do not rush the plot or wrap up early.`
     + ' Always write the story itself in Traditional Chinese (Taiwan).';
   const director = state.settings?.storyDirector !== false
     ? `【Scene Direction】${participants.length >= 2
@@ -528,7 +635,9 @@ export function buildStoryPrompt({ roomId }) {
     `【本場景記憶】\n${formatMemories(roomMemories)}`,
     `【世界書(依關鍵字觸發)】\n${loreText}`,
     ...(participants.every((c) => c.noPhone) ? [] : [`【最近的社群動態(公開；僅供了解角色近況，其發文時間與正文的劇情時間無關)】\n${recentFeedText(state, persona?.id)}`]),
-    `【回覆指令】${styleGuide} ${choiceGuide} 單次輸出長度上限約 ${maxReplyChars} 字。`,
+    promptEnS
+      ? `【Reply Rules】${styleGuide} ${choiceGuide} Target ${Math.round(maxReplyChars * 0.6)}~${maxReplyChars} Chinese characters this turn; advance in beats, weaving dialogue, action and interiority. Write ONLY in Traditional Chinese (Taiwan). Use 「」 for quoted speech.`
+      : `【回覆指令】${styleGuide} ${choiceGuide} 本回合目標 ${Math.round(maxReplyChars * 0.6)}~${maxReplyChars} 字，分幕推進，含對話/動作/心理。`,
     ...(director ? [director] : []),
     ...(room.authorNote?.trim()
       ? [`【作者備註(當前對話的最高優先指令，凌駕以上所有設定)】${room.authorNote.trim()}`]

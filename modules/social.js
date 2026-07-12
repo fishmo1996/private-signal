@@ -77,6 +77,63 @@ export async function toggleLike(postId) {
 }
 
 /** 新增留言。 */
+/**
+ * v79(a案):FB 式樓中樓歸樓器——共用單一實作(顯示端與 prompt 端同一套,不再各養一份)。
+ * 修 v-舊版 renderSocialPost 的 hops<20 保險絲:長樓鏈深超過 20 時爬到一半停住,把半路
+ * 留言誤認成樓主 → 整批掛錯根、渲染端只畫真樓主 → 留言無聲消失(擁有者實測約 40 則觸發)。
+ * 新版:記憶化+防循環記號,鏈多長都爬得到真根;循環(理論上不會有,匯入壞資料才可能)
+ * 走防呆。最後一道保險:孤兒群(根不在樓主清單)平鋪回最外層——寧可排版醜,絕不吞留言。
+ */
+export function groupComments(comments) {
+  const byId = new Map(comments.map((c) => [c.id, c]));
+  const rootCache = new Map();
+  const rootOf = (c0) => {
+    if (rootCache.has(c0.id)) return rootCache.get(c0.id);
+    const path = [];
+    const seen = new Set();
+    let cur = c0;
+    while (cur.replyTo?.commentId && byId.has(cur.replyTo.commentId)) {
+      if (seen.has(cur.id)) break; // 防循環:壞資料也不無窮迴圈
+      seen.add(cur.id);
+      path.push(cur.id);
+      if (rootCache.has(cur.id)) { cur = byId.get(rootCache.get(cur.id)); break; }
+      cur = byId.get(cur.replyTo.commentId);
+    }
+    const rid = rootCache.get(cur.id) || cur.id;
+    for (const id of path) rootCache.set(id, rid);
+    rootCache.set(c0.id, rid);
+    return rid;
+  };
+  const roots = [];
+  const childrenByRoot = new Map();
+  for (const c of comments) {
+    const rid = rootOf(c);
+    if (rid === c.id) { roots.push(c); continue; }
+    if (!childrenByRoot.has(rid)) childrenByRoot.set(rid, []);
+    childrenByRoot.get(rid).push(c);
+  }
+  // 孤兒防呆:根不在樓主清單的群,整批平鋪成樓主
+  const rootIds = new Set(roots.map((r) => r.id));
+  for (const [rid, kids] of [...childrenByRoot.entries()]) {
+    if (rootIds.has(rid)) continue;
+    for (const k of kids) { roots.push(k); rootIds.add(k.id); }
+    childrenByRoot.delete(rid);
+  }
+  roots.sort((x, y) => (x.createdAt || 0) - (y.createdAt || 0));
+  return { roots, childrenByRoot };
+}
+
+/** v79(c案):取出某留言所屬「那一樓」的完整串(樓主+全部樓中樓,時間序)。 */
+export function threadOf(postId, commentId) {
+  const comments = getComments(postId);
+  const { roots, childrenByRoot } = groupComments(comments);
+  for (const root of roots) {
+    const kids = childrenByRoot.get(root.id) || [];
+    if (root.id === commentId || kids.some((k) => k.id === commentId)) return [root, ...kids];
+  }
+  return [];
+}
+
 export async function addComment(postId, authorId, content, personaId = null, replyTo = null) {
   const text = String(content || '').trim();
   if (!text) return null;
@@ -256,7 +313,7 @@ export function rollLengthDirective(kind = 'post', rng = Math.random) {
  * 所有角色的公開設定、共享記憶、世界書、貼文與留言本身。
  * 絕不含任何角色的 DM 私密記憶或場景記憶。
  */
-export function buildSocialPrompt({ post, triggerText, replyToName = null, banter = false, rng = Math.random }) {
+export function buildSocialPrompt({ post, triggerText, replyToName = null, replyToCommentId = null, banter = false, rng = Math.random }) {
   const state = getState();
   const circle = circleOfPost(post, getCharacter);
   // 方案一：只有「認識這個人設」的角色會出面
@@ -274,13 +331,27 @@ export function buildSocialPrompt({ post, triggerText, replyToName = null, bante
   const shared = sharedMemoriesFor(circle)
     .map((m) => `- ${m.content}`).join('\n') || '(無)';
 
-  const comments = getComments(post.id).slice(-8)
-    .map((cm) => {
-      const who = cm.authorId === 'player' ? (getPersona(cm.personaId)?.name || '玩家') : (getCharacter(cm.authorId)?.name || '?');
-      const target = cm.replyTo?.name ? `(回覆 ${cm.replyTo.name})` : '';
-      return `${who}${target}:${cm.content}`;
-    })
-    .join('\n') || '(尚無留言)';
+  // v79(c案):長樓接話斷片修——舊版只帶「尾端 8 則」,40+ 則的長樓角色看不到前面 32 則。
+  // 有指名回覆時改帶「被回覆那一樓的完整串(超長截尾 20 則、每則截 80 字)+其他最新 4 則」;
+  // 沒指名(頂層留言/banter)維持尾端 8 則。
+  const fmtCm = (cm) => {
+    const who = cm.authorId === 'player' ? (getPersona(cm.personaId)?.name || '玩家') : (getCharacter(cm.authorId)?.name || '?');
+    const target = cm.replyTo?.name ? `(回覆 ${cm.replyTo.name})` : '';
+    const body = cm.content.length > 80 ? `${cm.content.slice(0, 80)}…` : cm.content;
+    return `${who}${target}:${body}`;
+  };
+  const allCm = getComments(post.id);
+  let commentSection;
+  const thread = replyToCommentId ? threadOf(post.id, replyToCommentId) : [];
+  if (thread.length) {
+    const cut = thread.slice(-20);
+    const inThread = new Set(cut.map((c) => c.id));
+    const others = allCm.filter((c) => !inThread.has(c.id)).slice(-4);
+    commentSection = `【這一樓的完整對話串(剛剛的留言屬於這串)】\n${cut.map(fmtCm).join('\n')}`
+      + (others.length ? `\n\n【貼文下其他最新留言】\n${others.map(fmtCm).join('\n')}` : '');
+  } else {
+    commentSection = `【既有留言】\n${allCm.slice(-8).map(fmtCm).join('\n') || '(尚無留言)'}`;
+  }
 
   const recentText = `${post.content}\n${triggerText}`;
   const seen = new Set(); const lore = [];
@@ -305,7 +376,7 @@ export function buildSocialPrompt({ post, triggerText, replyToName = null, bante
     `【共享記憶(公開)】\n${shared}`,
     `【世界書】\n${loreText}`,
     `【貼文】${authorName}:${post.content}`,
-    `【既有留言】\n${comments}`,
+    commentSection,
     ...(replyToName ? [`【剛剛的留言是指名回覆「${replyToName}」的：他應該優先出面回應；其他角色可補充也可以不出聲。`] : []),
     ...(banter ? ['【互聊指令】這次不是回覆誰:是你們這群人自己在這篇貼文底下留言互動起來——可以互虧、接話、嗆發文的人、歪樓。'
       + '依成員的年齡與熟度說話;若是台灣年輕人,用真實打字習慣:句短口語、語助詞和輕度髒話自然出現(幹、靠、笑死、==、好了啦),'
@@ -335,7 +406,7 @@ export function buildSocialPrompt({ post, triggerText, replyToName = null, bante
  * 產生角色留言：開啟真實 AI 時走單次 API 呼叫，否則走既有 mock。
  * 回傳 {ok, replies:[{characterId, content, delay}]} 或 {ok:false, message}。
  */
-export async function generateSocialReplies({ post, triggerText, triggerPersonaId = null, replyToName = null, banter = false }) {
+export async function generateSocialReplies({ post, triggerText, triggerPersonaId = null, replyToName = null, replyToCommentId = null, banter = false }) {
   const state = getState();
   const circle = circleOfPost(post, getCharacter);
   const circleChars = state.characters.filter((c) => (c.knownPersonaId || state.defaultPersonaId) === circle && !c.noPhone && !c.socialMute);
@@ -362,7 +433,7 @@ export async function generateSocialReplies({ post, triggerText, triggerPersonaI
     }
     return { ok: true, replies: mock };
   }
-  const r = await generateReply(cfg, buildSocialPrompt({ post, triggerText, replyToName, banter }),
+  const r = await generateReply(cfg, buildSocialPrompt({ post, triggerText, replyToName, replyToCommentId, banter }),
     { tier: getState().settings.secondaryForSocialDiary ? 'secondary' : 'primary' });
   if (!r.ok) return { ok: false, message: r.message };
   const replies = parseGroupReplies(r.text, circleChars)

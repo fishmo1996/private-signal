@@ -102,10 +102,11 @@ export async function generatePhonePeek(characterId, peekType) {
       content = stripNamePrefix(r.text, [character.name]).trim();
       if (peekType === 'search') content = sanitizeSearchSnapshot(content); // v61 輸出端防線
       if (peekType === 'draft') content = sanitizeDraftSnapshot(content); // v68:草稿去 --- 與 HTML
+      // v77(根源二):安全攔截已在 generateReply 層辨識並帶真實原因回來(上面的 r.message),
+      // 走到這裡的空內容=清潔器攔下的格式走鐘,重按確實有效,文案不誤導。
       if (!String(content || '').trim()) {
         return { ok: false, message: '這次生成的內容整包不合格式,已幫你攔下——再按一次「更新快照」通常就正常。' };
       }
-      if (!content) return { ok: false, message: '這一則被模型服務暫時擋下了(常見於敏感詞誤判)。再按一次「更新快照」通常就正常——這不是你的問題。' };
     } else {
       content = MOCK[peekType];
     }

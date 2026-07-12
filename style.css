@@ -1680,7 +1680,12 @@ body.theme-berry .bubble.user-bubble { background: color-mix(in srgb, var(--acce
   text-align: left;
   line-height: 1.5;
   cursor: pointer;
+  /* v77:預設收合為單行(擁有者回報全文展開太佔畫面),點擊開編輯 modal */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+.status-bar-card .sb-caret { float: right; opacity: 0.6; margin-left: 6px; }
 .status-bar-card.empty { border-style: dashed; opacity: 0.7; }
 
 /* 甜莓:淺色面板覆寫(管理面板/modal/輸入區——修「深底淡字看不清」) */
@@ -1923,4 +1928,11 @@ textarea#composerInput[data-autogrow] { overflow-y: auto; resize: none; }
   content: ""; width: 11px; height: 6px;
   border-left: 2.5px solid #fff; border-bottom: 2.5px solid #fff;
   transform: rotate(-45deg) translate(1px, -1px);
+}
+
+/* v79(b案):長樓折疊展開鈕 */
+.thread-expand {
+  display: block;
+  margin: 2px 0 8px 40px;
+  color: var(--ink-faint);
 }

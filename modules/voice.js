@@ -141,6 +141,34 @@ export function harvestTailTags(text) {
   return { content: lines.slice(0, end).join('\n').trim(), mood, status };
 }
 
+/**
+ * v77:全域標籤收割器(根源一)。v71 的 harvestTailTags 假設標籤在「尾部連續行」,
+ * 但模型把多則訊息黏成一大塊時,[心情:x] 會被埋在合併大塊的行內/中間(擁有者截圖:
+ * 標籤以訊息內容形式渲染、還污染了心聲路徑)。對策:先用全域 regex 從全文「任意位置」
+ * 抽走認識的標籤(心情/狀態),再跑尾部收割清掉山寨標記。
+ * 誤吃風險評估:正文要合法出現「[心情:🔥]」這種完整標籤格式幾乎不可能,
+ * 一般中括號(如「[不是標記]」)因標籤名不符不受影響(有斷言)。
+ */
+const MOOD_TAG_G = /(?:\[|\u3010)\s*心情\s*[:\uFF1A]\s*([^\]\u3011\n]{1,8}?)\s*(?:\]|\u3011)/g;
+const STATUS_TAG_G = /(?:\[|\u3010)\s*狀態\s*[:\uFF1A]\s*([^\]\u3011\n]{0,40}?)\s*(?:\]|\u3011)/g;
+export function harvestTags(text) {
+  let t = String(text || '');
+  let mood = null;
+  let status = null;
+  t = t.replace(MOOD_TAG_G, (whole, v) => {
+    const val = String(v).trim();
+    if (!mood && val && [...val].length <= 4) mood = val;
+    return ''; // 無論收不收,標籤本體一律從內容剝除,不裸露
+  });
+  t = t.replace(STATUS_TAG_G, (whole, v) => {
+    const val = String(v).trim();
+    if (!status && val && val.length <= 15) status = val; // >15 字丟棄但仍剝除(沿 v57 規格)
+    return '';
+  });
+  const tail = harvestTailTags(t); // 尾部山寨標記([好感度:x] 等)仍由 v71 收割器丟棄
+  return { content: tail.content, mood: mood ?? tail.mood, status: status ?? tail.status };
+}
+
 /** 從 AI 輸出偵測「[語音]」標記：回傳 {content, voice}。 */
 export function extractVoiceTag(text) {
   const t = String(text || '');

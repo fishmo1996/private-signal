@@ -69,4 +69,28 @@ for (const type of ['draft', 'search', 'playlist']) {
 // 甲本人的手機偷看可以有 K9(他自己的記憶),但標籤仍不得出現
 noLeak(flat(buildPhonePeekPrompt({ character: A, peekType: 'draft' })), '手機偷看(甲)', LABELS);
 
+
+// --- v79(d2/d3):旁觀群素材升級的隱私邊界 ---
+// d2 只帶「全體旁觀成員都在場」的一般群聊;部分成員在場的群、DM、正文一律不進。
+const { getRoomMessages: grm79 } = await import('../modules/state.js');
+const gAB = await createGroup('全員群79', [A.id, B.id]);
+grm79(gAB.id).push({ id: 'm79-1', role: 'user', senderId: 'player', content: '祕密代號GAB', createdAt: Date.now() });
+const { character: C79 } = await createCharacter({ name: '丙79' });
+const gOnlyA = await createGroup('缺席群79', [A.id, C79.id]); // 乙不在這個群
+grm79(gOnlyA.id).push({ id: 'm79-2', role: 'user', senderId: 'player', content: '祕密代號G2X', createdAt: Date.now() });
+dmA.relationshipStage = '階段代號S79';
+await persist();
+const pPk79 = flat(buildPeekPrompt({ roomId: pk.id }));
+t(pPk79.includes('GAB'), '旁觀:全員在場的群聊內容進得來(d2 正控制)');
+t(!pPk79.includes('G2X'), '旁觀:部分成員在場的群聊絕不進(乙不在就不帶,防穿幫)');
+t(pPk79.includes('S79'), '旁觀:成員各自對玩家的關係階段進得來(d3 正控制)');
+noLeak(pPk79, '旁觀(v79 素材升級後)', SECRETS); // DM 內容 H7/私密記憶 K9 仍然拿不到
+noLeak(pPk79, '旁觀(v79 素材升級後)', LABELS);
+// d1:留言進旁觀素材,但圈子隔離仍在——他圈貼文的留言不得進
+const { createPost: cp79, addComment: ac79 } = await import('../modules/social.js');
+const otherPost = await cp79('player', '他圈貼文79', null, 'psn_other_circle');
+if (otherPost) await ac79(otherPost.id, A.id, '祕密代號C79留言');
+const pPk79b = flat(buildPeekPrompt({ roomId: pk.id }));
+t(!pPk79b.includes('C79'), '旁觀:他圈貼文的留言不進(d1 圈子隔離沿用)');
+
 summary('隱私鐵律');
