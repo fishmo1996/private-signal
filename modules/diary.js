@@ -74,8 +74,9 @@ export function buildDiaryPrompt(character, rng = Math.random) {
     ? lore.map((e) => `- ${e.content}`).join('\n')
     : '(無)';
 
+  const dmRoomOfChar = getState().rooms.find((r) => r.type === 'dm' && !r.branchedFrom && r.participantIds.includes(character.id));
   const system = [
-    ...globalPromptSection(),
+    ...globalPromptSection(dmRoomOfChar?.id || null), // v82:日記繼承 DM 主線房的模組覆寫(以前只帶全域,按房開的框架拿不到)
     `你是「${character.name}」，正在寫只給自己看的日記。`,
     `【你的資料】${character.description || '(無)'};個性:${character.personality || '(未提供)'}${character.scenario ? `;情境:${character.scenario}` : ''}`,
     `【你最近經歷的對話】\n${context}`,

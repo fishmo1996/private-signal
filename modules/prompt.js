@@ -738,6 +738,7 @@ export function buildRoomInnerVoicePrompt({ character, roomId, messageId }) {
   const rt = { withRelativeTime: !isStory };
 
   const system = [
+    ...globalPromptSection(roomId), // v82:心聲同樣繼承所在房的全域指令+模組(含覆寫),不再裸奔
     `你是「${character.name}」。`,
     `【角色描述】${character.description || '(未提供)'}`,
     `【個性】${character.personality || '(未提供)'}`,
@@ -780,6 +781,10 @@ export function buildPhonePeekPrompt({ character, peekType }) {
   };
 
   const system = [
+    // v82:偷看手機以前完全沒帶全域指令與風格模組——正文有成人框架護體、這裡裸奔,
+    // 同一段感情戲正文能跑、偷看手機被安全過濾連咬(擁有者實案)。繼承 DM 主線房的
+    // 模組(含房間覆寫),與主對話同一套框架。
+    ...globalPromptSection(dmRoom?.id || null),
     `你是「${character.name}」。`,
     `【角色描述】${character.description || '(未提供)'}`,
     `【個性】${character.personality || '(未提供)'}`,

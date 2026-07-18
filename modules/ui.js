@@ -833,6 +833,11 @@ function renderMessages() {
         ? `<button class="remember-btn" data-inner-voice="${esc(m.id)}" aria-label="心聲">👁${(m.innerVoice || (m.innerVoices && Object.keys(m.innerVoices).length)) ? '' : '?'}</button>` : '')
       + `<button class="remember-btn danger" data-msg-del="${esc(m.id)}" aria-label="刪除訊息">刪除</button>`;
 
+    // v84(質感):同一人連發分組——非首則隱藏頭像與名字、縮小間距(有時間分組線就斷組)
+    const prevM = i > 0 ? msgs[i - 1] : null;
+    const cont = !!prevM && prevM.role === m.role && prevM.senderId === m.senderId
+      && !showTime && m.role !== 'system' && prevM.role !== 'narrator' && !m.missedCall;
+
     if (m.role === 'system') {
       return `<div class="msg-system">${esc(m.content)}
         <button class="remember-btn danger" data-msg-del="${esc(m.id)}" aria-label="刪除訊息">刪除</button></div>`;
@@ -855,15 +860,15 @@ function renderMessages() {
       </div>` : '';
     if (m.role === 'user') {
       return `
-        <div class="msg-row user">
+        <div class="msg-row user${cont ? ' cont' : ''}">
           <div class="bubble user-bubble">${shareHtml}${imgHtml}${esc(m.content).replaceAll('\n', '<br>')}</div>
           <div class="msg-meta">${time}${rememberBtn}${speakBtn}</div>
         </div>`;
     }
     const c = getCharacter(m.senderId);
-    const nameLine = room.type === 'dm' ? '' : `<div class="msg-sender">${esc(c ? c.name : '角色')}</div>`;
+    const nameLine = (room.type === 'dm' || cont) ? '' : `<div class="msg-sender">${esc(c ? c.name : '角色')}</div>`;
     return `
-      <div class="msg-row character">
+      <div class="msg-row character${cont ? ' cont' : ''}">
         ${avatarHtml(c, 'sm')}
         <div class="msg-col">
           ${nameLine}

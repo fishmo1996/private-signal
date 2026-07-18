@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap"); /* v84:質感字體(離線時自動退回系統字) */
 /* ============================================================
    私人訊號 — 桌機專用介面
    視覺方向:安靜的「暮色霧面」。深藍灰的層疊漸層、柔和光暈,
@@ -1944,3 +1945,53 @@ textarea#composerInput[data-autogrow] { overflow-y: auto; resize: none; }
 .audit-item.warn { background: #fef3c7; color: #92400e; }
 .audit-item.info { background: var(--panel-soft, #eef2ff); color: var(--ink-soft, #4b5563); }
 .audit-item.ok { background: #ecfdf5; color: #065f46; }
+
+/* ============================================================
+   v84 質感微整(A+B精華):字體/氣泡層次/連發分組/標題列
+   原則:只動質感 tokens 不動佈局;主題色系(粉/暮色)全相容。
+   ============================================================ */
+body, button, input, textarea, select {
+  font-family: 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, -apple-system, sans-serif;
+}
+
+/* 氣泡:去硬框線 → 雙層軟陰影+微漸層,收窄行高 */
+.bubble {
+  border-radius: 18px;
+  line-height: calc(1.55 * min(var(--fs-mult), 1.08));
+  box-shadow: 0 1px 1.5px rgba(45, 25, 45, 0.05), 0 5px 18px rgba(45, 25, 45, 0.05);
+}
+.char-bubble {
+  border-color: color-mix(in srgb, var(--c) 10%, transparent);
+  background: linear-gradient(175deg, var(--glass-strong), color-mix(in srgb, var(--c) 4%, var(--glass-strong)));
+}
+.user-bubble { border-color: transparent; }
+.msg-time { opacity: 0.75; }
+
+/* 連發分組:非首則藏頭像名字、縮間距、修圓角(視覺上連成一串) */
+.msg-row.cont { margin-top: -6px; }
+.msg-row.cont .avatar { visibility: hidden; }
+.msg-row.cont .bubble.char-bubble { border-top-left-radius: 8px; }
+.msg-row.cont .bubble.user-bubble { border-top-right-radius: 8px; }
+
+/* 標題列:毛玻璃+安靜按鈕(藥丸工具列感 → App 標題列感) */
+.phone-header {
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  background: color-mix(in srgb, var(--panel, #fff) 70%, transparent);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+.phone-header button:not(.back-btn) {
+  border-color: transparent;
+  background: transparent;
+}
+.phone-header button:not(.back-btn):active { background: rgba(0, 0, 0, 0.05); }
+.phone-title { font-weight: 700; letter-spacing: 0.01em; }
+
+/* 訊息進場輕動效(尊重系統減少動態設定) */
+@media (prefers-reduced-motion: no-preference) {
+  .msg-row { animation: msg-in 0.18s ease-out; }
+  @keyframes msg-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: none; }
+  }
+}

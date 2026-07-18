@@ -12,9 +12,14 @@
  *   1. 角色自己的公開設定(personality / scenario / avatarEmoji)
  *   2. 貼文與留言本身的內容
  *   3. 共享記憶(state.memories.shared)
- * 絕不讀取 memories.byCharacterId(DM 私密記憶)、memories.byRoomId(場景記憶)
- * 或任何 messagesByRoom 的 DM 內容，因此私訊不可能洩漏到社群。
- * 反向亦然：社群互動若要成為記憶，只會寫入 shared。
+ * v83 起細分為兩級:
+ * A. 多角色共用的「留言包」prompt(buildSocialPrompt,一次呼叫產多人)——
+ *    絕不讀取 memories.byCharacterId、byRoomId、任何 messagesByRoom;放進去=在場全員都讀到。
+ *    (v83 例外:各自的「關係階段」一句,擁有者核准的軟性資訊,框語不明講。)
+ * B. 單人呼叫(buildAutoPostPrompt 發文 / buildSoloSocialReplyPrompt 指名回覆)——
+ *    可讀「本人自己的」私密記憶與私訊尾段,並強制「公開版面要含蓄」指令;
+ *    絕不讀取其他角色的私密資料(隱私測試把關)。
+ * 反向不變：社群互動若要成為記憶，只會寫入 shared。
  */
 
 import { getState, genId, persist, getCharacter } from './state.js';
@@ -328,6 +333,15 @@ export function buildSocialPrompt({ post, triggerText, replyToName = null, reply
     c.scenario ? `  情境:${c.scenario}` : '',
   ].filter(Boolean).join('\n')).join('\n');
 
+  // v83(h1):各自對玩家的關係階段——擁有者核准的軟性注入(留言語氣不再像陌生人)。
+  // 注意這是多角色共用 prompt:階段彼此可見(旁人「感覺得出氛圍」是自然的),
+  // 但框語壓住輸出:不明講、不朗讀。祕密級內容不該寫在階段欄。
+  const stageLines = chars.map((c) => {
+    const r = state.rooms.find((rr) => rr.type === 'dm' && !rr.branchedFrom && rr.participantIds.includes(c.id));
+    const st = r?.relationshipStage?.trim();
+    return st ? `- ${c.name}:${st}` : '';
+  }).filter(Boolean);
+
   const shared = sharedMemoriesFor(circle)
     .map((m) => `- ${m.content}`).join('\n') || '(無)';
 
@@ -372,6 +386,7 @@ export function buildSocialPrompt({ post, triggerText, replyToName = null, reply
     ...globalPromptSection(),
     '你要扮演一個公開社群動態底下留言的多位角色。這是公開版面，角色只知道公開資訊。',
     `【角色公開資料】\n${profiles}`,
+    ...(stageLines.length ? [`【各自對「${persona?.name || '這個人'}」目前的關係階段(各自心裡的立場;會影響各自留言的語氣與距離感,但不要明講階段、不要朗讀這一欄)】\n${stageLines.join('\n')}`] : []),
     `【玩家(這個圈子認識的)】${persona?.name || '(未命名玩家)'}:${persona?.description || '(未提供)'}`,
     `【共享記憶(公開)】\n${shared}`,
     `【世界書】\n${loreText}`,
@@ -433,8 +448,24 @@ export async function generateSocialReplies({ post, triggerText, triggerPersonaI
     }
     return { ok: true, replies: mock };
   }
-  const r = await generateReply(cfg, buildSocialPrompt({ post, triggerText, replyToName, replyToCommentId, banter }),
-    { tier: getState().settings.secondaryForSocialDiary ? 'secondary' : 'primary' });
+  // v83(h4):玩家指名回覆「某角色的留言」→ 單人呼叫(DM 等級認知);
+  // 失敗或空回覆 → 落回原本的群呼叫,不白費這次互動。banter 不走單人。
+  const tier = { tier: getState().settings.secondaryForSocialDiary ? 'secondary' : 'primary' };
+  if (replyToCommentId && !banter) {
+    const target = getComments(post.id).find((c2) => c2.id === replyToCommentId);
+    const soloChar = target && target.authorId !== 'player'
+      ? circleChars.find((c2) => c2.id === target.authorId) : null;
+    if (soloChar) {
+      const rs = await generateReply(cfg, buildSoloSocialReplyPrompt({ post, character: soloChar, triggerText, replyToCommentId }), tier);
+      if (rs.ok) {
+        const content = stripNamePrefix(rs.text, [soloChar.name]).trim();
+        if (content) return { ok: true, replies: [{ characterId: soloChar.id, content, delay: 800 }] };
+      } else if (rs.blocked) {
+        return { ok: false, message: rs.message }; // 安全攔截給真實原因,不落回(群呼叫也會被咬)
+      }
+    }
+  }
+  const r = await generateReply(cfg, buildSocialPrompt({ post, triggerText, replyToName, replyToCommentId, banter }), tier);
   if (!r.ok) return { ok: false, message: r.message };
   const replies = parseGroupReplies(r.text, circleChars)
     .map((p, i) => ({ ...p, delay: 800 + i * 900 }));
@@ -464,6 +495,59 @@ function dmRoomIdOf(characterId) {
  * 除公開資訊外，「只」加入這位角色自己與玩家的 DM 最近幾句——
  * 一次呼叫只為一位角色發文，絕不把其他角色的私訊混進來。
  */
+/**
+ * v83(h4):指名回覆的「單人呼叫」prompt——玩家回覆某角色的留言時,只為他一人生成,
+ * 帶 DM 等級的認知(本人私密記憶/關係階段/最近私訊心情),其他角色零讀取。
+ * 「他回你留言終於像你們的關係,而別人依然什麼都不知道。」
+ * 繼承 DM 主線房的 globalPromptSection(成人框架/稱謂說明等模組全跟上)。
+ */
+export function buildSoloSocialReplyPrompt({ post, character, triggerText, replyToCommentId = null }) {
+  const state = getState();
+  const persona = getPersona(character.knownPersonaId) || defaultPersona();
+  const dmId = dmRoomIdOf(character.id);
+  const dmRoom = dmId ? state.rooms.find((r) => r.id === dmId) : null;
+  const privates = (state.memories.byCharacterId?.[character.id] || []).slice(0, 12)
+    .map((m) => `- ${m.content}`).join('\n');
+  const shared = sharedMemoriesFor(character.knownPersonaId || state.defaultPersonaId)
+    .map((m) => `- ${m.content}`).join('\n') || '(無)';
+  const dmLines = dmId
+    ? getRoomMessages(dmId).slice(-6)
+      .map((m) => `${m.role === 'user' ? (persona?.name || '玩家') : character.name}:${String(m.content).slice(0, 60)}`)
+      .join('\n')
+    : '';
+  const fmtCm = (cm) => {
+    const who = cm.authorId === 'player' ? (getPersona(cm.personaId)?.name || '玩家') : (getCharacter(cm.authorId)?.name || '?');
+    const target = cm.replyTo?.name ? `(回覆 ${cm.replyTo.name})` : '';
+    return `${who}${target}:${String(cm.content).slice(0, 80)}`;
+  };
+  const thread = replyToCommentId ? threadOf(post.id, replyToCommentId).slice(-20) : getComments(post.id).slice(-8);
+  const authorName = post.authorId === 'player' ? (getPersona(post.personaId)?.name || '玩家') : (getCharacter(post.authorId)?.name || '?');
+  const lore = matchEntries({ characterId: character.id, recentText: `${triggerText}\n${dmLines}`, presentNames: [character.name] });
+
+  const system = [
+    ...globalPromptSection(dmId), // 繼承 DM 房的全域指令+模組覆寫
+    `你是「${character.name}」。玩家「${persona?.name || '(未命名)'}」剛在公開社群的貼文下回覆了你的留言,你要回覆他。`,
+    `【你的公開資料】${character.description || '(無)'};個性:${character.personality || '(未提供)'}${character.emojiStyle?.trim() ? `;Emoji 習慣:${character.emojiStyle.trim()}` : ''}`,
+    ...(privates ? [`【你的私密記憶(只有你自己知道)】\n${privates}`] : []),
+    `【共享記憶(公開)】\n${shared}`,
+    ...(dmRoom?.relationshipStage?.trim() ? [`【你們目前的關係階段】${dmRoom.relationshipStage.trim()}(背景理解,不要複述)`] : []),
+    ...(dmLines ? [`【你們最近的私訊(只有你自己知道,別人看不到)】\n${dmLines}`] : []),
+    ...(lore.length ? [`【世界書】\n${lore.map((e) => `- ${e.content}`).join('\n')}`] : []),
+    `【貼文】${authorName}:${post.content}`,
+    `【這一樓的對話串】\n${thread.map(fmtCm).join('\n') || '(無)'}`,
+    '【輸出】只輸出一則留言內容本身(不要名字前綴、不要 JSON、不要引號包裹)。'
+      + '語氣要有你們真實關係的溫度與距離感——這不是對陌生人說話。'
+      + '但這是公開版面,其他人都看得到:涉及兩人私事要像真人一樣含蓄,不點破、不貼私訊原文、不寫明私密細節。'
+      + '長度像真實留言,一兩句即可。',
+  ].join('\n\n');
+
+  return {
+    system,
+    messages: [{ role: 'user', content: triggerText || '(玩家回覆了你的留言)' }],
+    meta: { maxReplyChars: 300, mode: 'social-solo', roomId: dmId },
+  };
+}
+
 export function buildAutoPostPrompt(character, rng = Math.random) {
   const state = getState();
   const shared = sharedMemoriesFor(character.knownPersonaId || state.defaultPersonaId).map((m) => `- ${m.content}`).join('\n') || '(無)';
@@ -491,6 +575,11 @@ export function buildAutoPostPrompt(character, rng = Math.random) {
     `你是「${character.name}」，正要在公開社群發一篇貼文。`,
     `【你的公開資料】${character.description || '(無)'};個性:${character.personality || '(未提供)'}${character.scenario ? `;情境:${character.scenario}` : ''}${character.emojiStyle?.trim() ? `;Emoji 習慣:${character.emojiStyle.trim()}` : ''}`,
     `【共享記憶(公開)】\n${shared}`,
+    ...(() => { // v83(h2):發文是單人呼叫,帶「本人自己的」私密記憶——發文終於有你們的影子
+      const privates = (state.memories.byCharacterId?.[character.id] || []).slice(0, 12)
+        .map((m) => `- ${m.content}`).join('\n');
+      return privates ? [`【你的私密記憶(只有你自己知道)】\n${privates}\n發文可以被這些事觸動,但這是公開版面——像真人一樣含蓄:不點名、不寫明細節、不把私事攤開。`] : [];
+    })(),
     `【世界書】\n${loreText}`,
     `【最近的社群動態】\n${recentPosts}`,
     ...(() => {

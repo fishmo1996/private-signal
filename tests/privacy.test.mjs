@@ -93,4 +93,23 @@ if (otherPost) await ac79(otherPost.id, A.id, '祕密代號C79留言');
 const pPk79b = flat(buildPeekPrompt({ roomId: pk.id }));
 t(!pPk79b.includes('C79'), '旁觀:他圈貼文的留言不進(d1 圈子隔離沿用)');
 
+
+// --- v83(h1/h2/h4):社群兩級隱私——留言包滴水不漏,單人呼叫只帶「本人的」 ---
+const {
+  buildSocialPrompt: bsp83, buildAutoPostPrompt: bap83,
+  buildSoloSocialReplyPrompt: solo83, createPost: cp83, addComment: ac83,
+} = await import('../modules/social.js');
+const post83 = await cp83('player', '公開貼文83');
+const cm83 = await ac83(post83.id, A.id, '甲的留言');
+const pkg83 = flat(bsp83({ post: post83, triggerText: 'x' }));
+noLeak(pkg83, '留言包(h1 後)', [...SECRETS, ...LABELS]); // 多角色共用:私密記憶/DM 依然滴水不漏
+t(pkg83.includes('S79'), '留言包:關係階段軟性注入(h1 正控制,擁有者核准)');
+t(flat(bap83(A)).includes('K9'), '發文(甲):含本人私密記憶(h2 正控制)');
+t(!flat(bap83(B)).includes('K9'), '發文(乙):絕不含他人私密記憶');
+const solo83A = flat(solo83({ post: post83, character: A, triggerText: 'x', replyToCommentId: cm83.id }));
+t(solo83A.includes('K9') && solo83A.includes('S79'), '指名回覆(甲):本人記憶+關係階段(h4 正控制)');
+noLeak(solo83A, '指名回覆(甲)', LABELS); // 備註標籤永不進 prompt(H7 是甲自己的 DM,單人呼叫本來就可帶)
+const solo83B = flat(solo83({ post: post83, character: B, triggerText: 'x' }));
+t(!solo83B.includes('K9') && !solo83B.includes('H7'), '指名回覆(乙):拿不到甲的記憶與甲的 DM');
+
 summary('隱私鐵律');
