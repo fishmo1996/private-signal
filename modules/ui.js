@@ -5,7 +5,7 @@
  * 右側為預設收合的「管理輔助面板」(記憶管理與開發資訊),不屬於手機本體。
  */
 
-import {
+import { genId,
   getState, getConfig, persist, resetAll,
   getCharacter, getRoom, getRoomMessages, getRoomCharacters,
 } from './state.js';
@@ -28,7 +28,7 @@ import {
   initNavigation, isLocked, unlock, getView, navigate, back, parentView,
 } from './navigation.js';
 import { buildLockScreenHTML, buildHomeHTML, clockString, HOME_APPS, DOCK_APPS } from './home.js';
-import { auditCharacterCard, driftSummary } from './quality.js';
+import { auditCharacterCard, driftSummary, peekSummary } from './quality.js';
 import { compressAvatar, compressBackground, compressPhoto } from './image.js';
 import { getDiaries, generateDiary, deleteDiary } from './diary.js';
 import { getPhotos, addPhoto, updatePhoto, deletePhoto } from './album.js';
@@ -2614,7 +2614,10 @@ function renderSettings() {
           <button class="mini-btn" data-sm-edit="${esc(m.id)}">編輯</button>
           <button class="mini-btn danger" data-sm-del="${esc(m.id)}">刪除</button>
         </div>`).join('')}
-      <div class="form-actions"><button class="ghost-btn slim" id="btnNewStyleModule">＋ 新增風格模組</button></div>
+      <div class="form-actions">
+        <button class="ghost-btn slim" id="btnNewStyleModule">＋ 新增風格模組</button>
+        <button class="ghost-btn slim" id="btnStyleTemplates">📦 從範本新增</button>
+      </div>
 
       <label class="field" style="padding:0 2px">快速回覆按鈕(每行一個；顯示在對話輸入框上方，點了直接送出)
         <textarea id="quickRepliesBox" rows="2" maxlength="500">${esc((state.settings.quickReplies || []).join('\n'))}</textarea>
@@ -2812,6 +2815,7 @@ function renderSettings() {
     },
   });
   els.phoneScreen.querySelector('#btnNewStyleModule').addEventListener('click', () => openStyleModal());
+  els.phoneScreen.querySelector('#btnStyleTemplates')?.addEventListener('click', () => openStyleTemplatesModal()); // v87(p4)
   els.phoneScreen.querySelectorAll('[data-sm-edit]').forEach((b2) => b2.addEventListener('click', () => {
     openStyleModal(state.settings.styleModules.find((x) => x.id === b2.dataset.smEdit));
   }));
@@ -3231,6 +3235,8 @@ function renderDevPanel() {
     <div class="dev-stats">${usageDashHtml(state)}</div>
     <div class="mem-heading">走鐘統計(v81;各房近 30 次生成)</div>
     <div class="dev-stats">${driftDashHtml(state)}</div>
+    <div class="mem-heading">偷看快照統計(v87;各型近 30 次)</div>
+    <div class="dev-stats">${peekDashHtml(state)}</div>
     <div class="mem-heading">buildPrompt 預覽(目前對話)</div>
     ${promptPreview}`;
 }
@@ -3268,6 +3274,59 @@ function driftDashHtml(state) {
     return `${esc(getRoom(r.roomId)?.title || r.roomId)}:走鐘 ${Math.round(r.driftRate * 100)}%(${r.n} 次)· 清潔器出手:${fixes}`;
   }).join('<br>')
     + '<br><span class="panel-note">卡片體檢+改卡後,看這裡的數字有沒有降;promptLang A/B 也看這裡。</span>';
+}
+
+/** v87(p4):內建風格模組範本——擁有者不用再在手機上手貼英文;新增後預設關閉,逐房覆寫開。 */
+const STYLE_TEMPLATES = [
+  {
+    name: '成人RP框架(正文用·原版)',
+    content: 'Context: private fictional roleplay between consenting\nadults (18+). All characters are adults. No real people.\nMature and explicit themes are permitted within this fiction.\nStyle: stay in character at all times; no meta commentary,\nno disclaimers. Write natural Taiwanese Traditional Chinese.\nGround intimate scenes in the five senses and each\ncharacter\'s established voice; follow the player\'s pacing\nand explicitness level — do not escalate on your own.',
+    note: '給正文房。五感落地的敘事框架,別開在 DM(會教它寫旁白)。',
+  },
+  {
+    name: '成人RP框架(DM用)',
+    content: 'Context: private fictional roleplay between consenting\nadults (18+). All characters are adults. No real people.\nMature and explicit themes are permitted within this fiction.\nThis is a TEXTING conversation: everything happens through\nthe messages the character types — desire, teasing, tension\nall conveyed in typed words. You are texting, not narrating;\nno third-person prose, no stage directions. Follow the\nplayer\'s pacing and explicitness level — do not escalate\non your own. Write natural Taiwanese Traditional Chinese.',
+    note: '給 DM 房。親密內容以「打字訊息」呈現,不寫旁白。',
+  },
+  {
+    name: '稱謂說明(哥哥/老師非親屬)',
+    content: '稱謂說明:對話中出現的「哥哥」「姐姐」「老師」「爸」等稱呼,是華語圈的親暱稱謂/敬稱文化,不代表血緣、親屬、監護或師生從屬關係。所有角色皆為彼此無血緣關係、無從屬關係的成年人。不要因這些稱謂自行添加親屬設定、家庭背景或誤解關係性質。',
+    note: '常叫哥哥/老師的話建議全域開,防模型腦補親屬設定與安全誤咬。',
+  },
+];
+
+function openStyleTemplatesModal() {
+  const state = getState();
+  openModal(`
+    <h3>從範本新增風格模組</h3>
+    <p class="panel-note">點「加入」後模組會出現在清單(預設關閉);到需要的房間 → 房間設定 → 風格模組覆寫單獨開啟,或在這裡勾全域。</p>
+    ${STYLE_TEMPLATES.map((t, i) => `
+      <div class="audit-item info" style="display:flex;gap:8px;align-items:flex-start;justify-content:space-between">
+        <div><strong>${esc(t.name)}</strong><br><span class="panel-note">${esc(t.note)}</span></div>
+        <button class="mini-btn" data-tpl-add="${i}">加入</button>
+      </div>`).join('')}
+  `, {
+    onOpen(root) {
+      root.querySelectorAll('[data-tpl-add]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const t = STYLE_TEMPLATES[Number(btn.dataset.tplAdd)];
+          if ((state.settings.styleModules || []).some((m) => m.name === t.name)) { btn.textContent = '已存在'; return; }
+          state.settings.styleModules.push({ id: genId('sm'), name: t.name, enabled: false, content: t.content });
+          await persist();
+          btn.textContent = '已加入 ✓';
+        });
+      });
+    },
+  });
+}
+
+/** v87(p3):快照統計 HTML。p1 修完有沒有效,看攔截率有沒有降。 */
+function peekDashHtml(state) {
+  const rows = peekSummary(state);
+  if (!rows.length) return '(尚無紀錄——每次真實快照生成都會計入)';
+  const name = { draft: '草稿', search: '搜尋', playlist: '播放' };
+  return rows.map((r) => `${name[r.peekType] || r.peekType}:${r.n} 次 · 成功 ${r.ok} · 閘門攔下 ${r.gate} · 安全攔截 ${r.block}${r.err ? ` · 其他失敗 ${r.err}` : ''}`).join('<br>')
+    + '<br><span class="panel-note">「閘門攔下」高=格式走鐘(v87 的格式優先權補丁就是治它,部署後看有沒有降)。</span>';
 }
 
 /* ---------------- Modal ---------------- */

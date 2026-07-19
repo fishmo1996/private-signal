@@ -6,6 +6,7 @@
  */
 
 import { getState, genId, persist, getCharacter } from './state.js';
+import { recordPeek } from './quality.js';
 import { getApiConfig, generateReply, stripNamePrefix } from './api.js';
 import { buildPhonePeekPrompt } from './prompt.js';
 
@@ -54,6 +55,29 @@ export function sanitizeSearchSnapshot(text) {
  * (會誤刪),只針對草稿實際會出的兩種髒東西:HTML 標籤殘骸、以及被當成內容吐出來的
  * 「---」分隔線與純旁白行。
  */
+/**
+ * v86.1:播放清單格式閘門(三快照最後一塊拼圖;v76 只裝了草稿與搜尋)。
+ * 擁有者截圖:「最近播放」整包只剩一句要傳給玩家的台詞(「我馬上就到,別亂跑…」)。
+ * 合約=任務規定的「歌名 — 歌手」每行一首+尾行「循環理由:…」;
+ * 沒有分隔符的行(=台詞/訊息走鐘)一律丟;歌曲行全滅 → 回空攔下重按。
+ */
+export function sanitizePlaylistSnapshot(text) {
+  const lines = String(text || '')
+    .replace(/<\/?[a-zA-Z][^>]*>/g, '')
+    .split('\n').map((l) => l.trim().replace(/^[♪♫🎵🎶]\s*/, ''))
+    .filter((l) => l && !/^-{2,}$/.test(l));
+  const songs = [];
+  let reason = '';
+  for (const l of lines) {
+    if (/^循環理由\s*[::]/.test(l)) { if (!reason) reason = l; continue; }
+    // 歌曲行合約:歌名 — 歌手(認 em/en dash、全形橫線、hyphen、｜/|、by)
+    if (/\S\s*(?:—|–|─|-|｜|\|)\s*\S/.test(l) || /\sby\s/i.test(l)) { songs.push(l); continue; }
+    // 其餘=台詞/訊息/說明走鐘,丟
+  }
+  if (!songs.length) return ''; // 全滅=整包走鐘,攔下讓上層回「重按」
+  return [...songs.slice(0, 8), ...(reason ? [reason] : [])].join('\n');
+}
+
 export function sanitizeDraftSnapshot(text, characterName = '') {
   const bare = (x) => String(x || '').replace(/[^\p{Script=Han}A-Za-z0-9]/gu, '');
   const selfBare = bare(characterName);
@@ -110,15 +134,23 @@ export async function generatePhonePeek(characterId, peekType) {
     if (cfg.useRealApi && cfg.apiKey && cfg.model) {
       const prompt = buildPhonePeekPrompt({ character, peekType });
       const r = await generateReply(cfg, prompt, { tier: 'secondary' });
-      if (!r.ok) return { ok: false, message: r.message };
+      if (!r.ok) {
+        recordPeek(getState(), peekType, r.blocked ? 'block' : 'err'); // v87(p3)
+        await persist();
+        return { ok: false, message: r.message };
+      }
       content = stripNamePrefix(r.text, [character.name]).trim();
       if (peekType === 'search') content = sanitizeSearchSnapshot(content); // v61 輸出端防線
       if (peekType === 'draft') content = sanitizeDraftSnapshot(content, character.name); // v68 清潔+v84.3 自寄守門
+      if (peekType === 'playlist') content = sanitizePlaylistSnapshot(content); // v86.1:播放清單格式閘門
       // v77(根源二):安全攔截已在 generateReply 層辨識並帶真實原因回來(上面的 r.message),
       // 走到這裡的空內容=清潔器攔下的格式走鐘,重按確實有效,文案不誤導。
       if (!String(content || '').trim()) {
+        recordPeek(getState(), peekType, 'gate'); // v87(p3):閘門攔下率進統計
+        await persist();
         return { ok: false, message: '這次生成的內容整包不合格式,已幫你攔下——再按一次「更新快照」通常就正常。' };
       }
+      recordPeek(getState(), peekType, 'ok'); // v87(p3)
     } else {
       content = MOCK[peekType];
     }

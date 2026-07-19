@@ -76,6 +76,16 @@ const s10 = splitChatParts('第一則\n---\n甲:第二則', ['甲']);
 t(s10.length === 2 && s10[1] === '第二則', 'v77 拆條後每則行首「名字:」補剝(不要求後跟時間戳)');
 t(splitChatParts('他說甲:你好,我笑了', ['甲'])[0] === '他說甲:你好,我笑了', 'v77 防誤傷:句中轉述「名字:」不剝(僅則首)');
 
+// --- v86.1:播放清單格式閘門(三快照最後一塊;擁有者截圖:整包只剩一句台詞) ---
+const { sanitizePlaylistSnapshot } = await import('../modules/phonepeek.js');
+const plGood = '夜空中最亮的星 — 逃跑計劃\n倒數 — 鄧紫棋\n循環理由:想到等等要見到她。';
+t(sanitizePlaylistSnapshot(plGood) === plGood, 'v86.1 合法清單原樣通過(含循環理由)');
+const plMixed = '我馬上就到,別亂跑,今晚我們就膩在一起。\n倒數 — 鄧紫棋\n循環理由:想她。';
+const plOut = sanitizePlaylistSnapshot(plMixed);
+t(!plOut.includes('別亂跑') && plOut.includes('倒數'), 'v86.1 台詞行丟棄、歌曲行保留');
+t(sanitizePlaylistSnapshot('♪ 我馬上就到,別亂跑,誰也不准分開。') === '', 'v86.1 整包台詞=全滅攔下(回空讓上層教重按)');
+t(sanitizePlaylistSnapshot('Blinding Lights by The Weeknd\n循環理由:練歌。').includes('Blinding'), 'v86.1 英文 by 格式也認');
+
 // --- v84.3:草稿收件人守門(模型把「誰寫給誰」搞混,吐出寄給自己的草稿) ---
 const { sanitizeDraftSnapshot: sds843 } = await import('../modules/phonepeek.js');
 const draftRaw = 'To:莫映里||今晚去你家||好想見他\nTo:謝子勳||帶妳吃熱炒||想炫耀\n鄭翰元||留空檔||尷尬';

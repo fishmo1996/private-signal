@@ -87,3 +87,21 @@ export function auditCharacterCard(card) {
   }
   return findings;
 }
+
+
+/** v87(p3):偷看快照結果紀錄(每型滾動 30 筆)。outcome: 'ok'|'gate'(閘門攔下)|'block'(安全攔截)|'err'。 */
+export function recordPeek(state, peekType, outcome) {
+  if (!state.peekStats) state.peekStats = {};
+  if (!Array.isArray(state.peekStats[peekType])) state.peekStats[peekType] = [];
+  const arr = state.peekStats[peekType];
+  arr.push({ t: Date.now(), o: outcome });
+  if (arr.length > 30) arr.splice(0, arr.length - 30);
+}
+
+/** v87(p3):快照統計摘要(開發資訊用)。 */
+export function peekSummary(state) {
+  return Object.entries(state.peekStats || {}).map(([peekType, arr]) => {
+    const c = (o) => arr.filter((r) => r.o === o).length;
+    return { peekType, n: arr.length, ok: c('ok'), gate: c('gate'), block: c('block'), err: c('err') };
+  });
+}
