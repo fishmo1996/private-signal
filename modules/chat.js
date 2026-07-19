@@ -8,7 +8,7 @@
 import { getCharacter,
   getState, genId, persist, getRoom, getRoomMessages, getRoomCharacters,
 } from './state.js';
-import { buildPrompt, buildGroupPrompt, buildStoryPrompt, buildPeekPrompt, buildRoomInnerVoicePrompt } from './prompt.js';
+import { buildPrompt, buildGroupPrompt, buildGroupSoloPrompt, buildStoryPrompt, buildPeekPrompt, buildRoomInnerVoicePrompt } from './prompt.js';
 import { getApiConfig, generateReply, stripNamePrefix, parseGroupReplies, stripTsPrefix, cutInlineTsRecitation, COLON_CLS } from './api.js';
 import { extractVoiceTag, harvestTags } from './voice.js';
 import { assessDmDrift, recordDrift } from './quality.js';
@@ -369,6 +369,31 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
       // @點名：訊息含「@角色名」時，該角色必回
       const mentioned = participants.find((c) => text.includes(`@${c.name}`)) || null;
       if (cfgG.useRealApi && cfgG.apiKey && cfgG.model) {
+        // v85(j1):@點名=單人呼叫(硬保證+DM 等級認知)——舊版點名只是整包生成裡的
+        // 軟指令,會發生「@楊皓結果子勳回」甚至「楊皓穿子勳的人設回」(擁有者實案);
+        // 單人呼叫的 prompt 裡只有他一個人的卡,想滲都沒得滲。失敗落回整包不白費;
+        // 被安全過濾攔下直接講原因(整包也會被咬,別多燒一次)。
+        if (mentioned) {
+          notify({ typingBy: mentioned.name });
+          const rs = await generateReply(cfgG, buildGroupSoloPrompt({ roomId, characterId: mentioned.id }));
+          if (rs.ok) {
+            const allN = participants.map((cc) => cc.name);
+            const soloParts = splitChatParts(harvestTags(stripNamePrefix(rs.text, allN)).content, allN);
+            for (const [pi, part] of soloParts.entries()) {
+              if (pi > 0) { notify({ typingBy: mentioned.name }); await sleep(450 + Math.min(part.length * 20, 900)); }
+              appendMessage(roomId, { role: 'character', senderId: mentioned.id, content: part });
+              await persist();
+              notify({});
+            }
+            if (soloParts.length) return;
+            // 拆完是空的 → 往下落回整包
+          } else if (rs.blocked) {
+            appendMessage(roomId, { role: 'system', senderId: 'system', content: `${rs.message}(你的訊息已保留)` });
+            await persist(); notify({});
+            return;
+          }
+          // 其他失敗 → 落回整包(軟點名指令仍在,不白費這次互動)
+        }
         // 一次 API 呼叫產生整包多角色訊息(而非每角色各打一次，省成本)
         notify({ typingBy: (mentioned || participants[0])?.name || '' });
         const r = await generateReply(cfgG, buildGroupPrompt({ roomId, mentionName: mentioned?.name || null }));
@@ -477,10 +502,15 @@ export async function deleteMessage(roomId, messageId) {
  * 群聊自燃：角色們自己聊起來(↻ 觸發，與其他刷新共用節流哲學)
  * ------------------------------------------------------------ */
 
-export function selfChatCooldownLeft() {
+export function selfChatCooldownLeft(roomId = null) {
+  // v84.5(擁有者核准):冷卻改「每個房各自計」+ 2 分鐘(原全域 10 分鐘——刷 A 群會害 B 群一起冷卻)。
+  // 隱藏設定 settings.sideCooldownMin 可調,無 UI。
   const state = getState();
-  const cooldownMs = (state.settings.autoPostCooldownMin ?? 10) * 60000;
-  return Math.max(0, Math.ceil(((state.selfChatLastRefresh || 0) + cooldownMs - Date.now()) / 1000));
+  const cooldownMs = (state.settings.sideCooldownMin ?? 2) * 60000;
+  const last = roomId
+    ? (state.selfChatLastRefreshByRoom?.[roomId] || 0)
+    : (state.selfChatLastRefresh || 0); // 未帶 id=舊語意(相容)
+  return Math.max(0, Math.ceil((last + cooldownMs - Date.now()) / 1000));
 }
 
 /**
@@ -497,8 +527,8 @@ export async function selfChat(roomId, notify, opts = {}) {
   const isEmptyRoom = (getRoomMessages(roomId) || []).length === 0;
   if (!opts.force && !isEmptyRoom) {
     // 空房第一把免冷卻；冷卻只在「成功」後才開始計(失敗不燒額度)
-    const left = selfChatCooldownLeft();
-    if (left > 0) return { ok: false, message: `再等 ${Math.ceil(left / 60)} 分鐘可以再刷新` };
+    const left = selfChatCooldownLeft(roomId);
+    if (left > 0) return { ok: false, message: `再等 ${Math.max(1, Math.ceil(left / 60))} 分鐘可以再刷新` };
   }
 
   busyRoomIds.add(roomId);
@@ -529,7 +559,8 @@ export async function selfChat(roomId, notify, opts = {}) {
         await persist(); notify({ typingBy: '' }); notify({});
         return { ok: false, message: '這次大家都沒開口，再試一次' };
       }
-      state.selfChatLastRefresh = Date.now();
+      if (!state.selfChatLastRefreshByRoom) state.selfChatLastRefreshByRoom = {};
+      state.selfChatLastRefreshByRoom[roomId] = Date.now(); // v84.5:成功才計,且只鎖本房
       for (const [i, rep] of replies.entries()) {
         notify({ typingBy: getCharacter(rep.characterId)?.name || '' });
         // eslint-disable-next-line no-await-in-loop
@@ -543,7 +574,8 @@ export async function selfChat(roomId, notify, opts = {}) {
       return { ok: true, count: replies.length };
     }
     // mock:兩三句互虧
-    state.selfChatLastRefresh = Date.now();
+    if (!state.selfChatLastRefreshByRoom) state.selfChatLastRefreshByRoom = {};
+      state.selfChatLastRefreshByRoom[roomId] = Date.now(); // v84.5:成功才計,且只鎖本房
     const seed = hashStr(roomId) + Math.floor(Date.now() / 60000);
     const [c1, c2] = [participants[seed % participants.length], participants[(seed + 1) % participants.length]];
     const lastUser = getRoomMessages(roomId).filter((m) => m.role === 'user').slice(-1)[0];
@@ -618,8 +650,9 @@ export async function generateInnerVoice(roomId, messageId, characterId = null) 
       if (!prompt) return { ok: false, message: '這個房型不支援心聲' };
       const r = await generateReply(cfg, prompt, { tier: 'secondary' });
       if (!r.ok) return { ok: false, message: r.message };
-      text = stripNamePrefix(r.text, [character.name]).trim();
-      text = cutInlineTsRecitation(text, [character.name]); // v76:行內「名字:(時間戳)」截尾+孤立時間戳剝除(心聲不走拆條,v70 防線管不到)
+      const allNames = room.type === 'dm' ? [character.name] : getRoomCharacters(room).map((cc) => cc.name); // v84.4:群/正文剝全員前綴(模型冒名時別人的「名字:」不能漏出)
+      text = stripNamePrefix(r.text, allNames).trim();
+      text = cutInlineTsRecitation(text, allNames); // v76:行內「名字:(時間戳)」截尾+孤立時間戳剝除(心聲不走拆條,v70 防線管不到)
       text = harvestTags(text).content; // v77(根源一):心聲同樣先過標籤抽取——[心情:x] 曾污染心聲卡只剩純 emoji(擁有者截圖);心聲的心情/狀態一律丟棄不落地
       if (!text) return { ok: false, message: '心聲生成失敗(內容被剝乾淨了),請再按一次重試' };
     } else {

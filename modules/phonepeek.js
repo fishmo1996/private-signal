@@ -54,7 +54,9 @@ export function sanitizeSearchSnapshot(text) {
  * (會誤刪),只針對草稿實際會出的兩種髒東西:HTML 標籤殘骸、以及被當成內容吐出來的
  * 「---」分隔線與純旁白行。
  */
-export function sanitizeDraftSnapshot(text) {
+export function sanitizeDraftSnapshot(text, characterName = '') {
+  const bare = (x) => String(x || '').replace(/[^\p{Script=Han}A-Za-z0-9]/gu, '');
+  const selfBare = bare(characterName);
   const lines = String(text || '')
     .replace(/<\/?[a-zA-Z][^>]*>/g, '') // HTML 標籤殘骸
     .split('\n').map((l) => l.trim())
@@ -62,7 +64,17 @@ export function sanitizeDraftSnapshot(text) {
     .filter((l) => !/^\|\|/.test(l)) // v70:丟「||」開頭的行(缺收件人/本體、只剩內心註記的走鐘草稿)
     // v76:欄位守門——沒有任何「||」的裸句=走鐘(缺「沒送出的原因」欄,擁有者截圖:整包只剩
     // 一句下一則台詞充當草稿)。合法格式=三欄新版或二欄舊版,至少含一個 ||;全丟=回空攔下重按。
-    .filter((l) => l.includes('||'));
+    .filter((l) => l.includes('||'))
+    // v84.3:收件人守門——模型偶爾把「誰寫給誰」搞混,吐出寄給「自己」的草稿
+    // (擁有者截圖:謝子勳 To:謝子勳 約自己吃熱炒)。第一欄=收件人,正規化後與角色
+    // 本名相同/互含(≥2字)一律丟;寧可少一則,不留人格分裂快照。
+    .filter((l) => {
+      if (!selfBare) return true;
+      const rb = bare(String(l.split('||')[0] || '').replace(/^To\s*[::]?/i, ''));
+      if (!rb) return true;
+      const hit = rb === selfBare || (rb.length >= 2 && selfBare.length >= 2 && (rb.includes(selfBare) || selfBare.includes(rb)));
+      return !hit;
+    });
   return lines.join('\n').trim();
 }
 
@@ -101,7 +113,7 @@ export async function generatePhonePeek(characterId, peekType) {
       if (!r.ok) return { ok: false, message: r.message };
       content = stripNamePrefix(r.text, [character.name]).trim();
       if (peekType === 'search') content = sanitizeSearchSnapshot(content); // v61 輸出端防線
-      if (peekType === 'draft') content = sanitizeDraftSnapshot(content); // v68:草稿去 --- 與 HTML
+      if (peekType === 'draft') content = sanitizeDraftSnapshot(content, character.name); // v68 清潔+v84.3 自寄守門
       // v77(根源二):安全攔截已在 generateReply 層辨識並帶真實原因回來(上面的 r.message),
       // 走到這裡的空內容=清潔器攔下的格式走鐘,重按確實有效,文案不誤導。
       if (!String(content || '').trim()) {

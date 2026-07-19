@@ -61,4 +61,17 @@ globalThis.fetch = async () => ({ ok: true, json: async () => ({ candidates: [{ 
 const rb3 = await generateReply(CFG, { system: 's', messages: [], meta: {} });
 t(rb3.ok && rb3.text === '正常回覆', 'v77 迴歸:finishReason=STOP 正常路徑不受影響');
 
+// 9) v84.2:思考 headroom 與 MAX_TOKENS 分流(心聲被思考餓死誤報成審查的實案)
+let body842 = '';
+globalThis.fetch = async (u, i) => { body842 = String(i?.body || ''); return { ok: true, json: async () => ({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '好' }] } }] }) }; };
+await generateReply({ provider: 'gemini', apiKey: 'k', model: 'gemini-test', thinkingBudget: '', presets: [] }, { system: 's', messages: [], meta: { maxReplyChars: 300 } });
+t(JSON.parse(body842).generationConfig.maxOutputTokens >= 4096, 'v84.2 思考自管:小額度任務保底 4096(不再被思考吃光)');
+await generateReply({ provider: 'gemini', apiKey: 'k', model: 'gemini-test', thinkingBudget: 0, presets: [] }, { system: 's', messages: [], meta: { maxReplyChars: 300 } });
+t(JSON.parse(body842).generationConfig.maxOutputTokens === 600, 'v84.2 思考已關:維持原額度不多花錢');
+await generateReply({ provider: 'gemini', apiKey: 'k', model: 'gemini-test', thinkingBudget: 1000, presets: [] }, { system: 's', messages: [], meta: { maxReplyChars: 300 } });
+t(JSON.parse(body842).generationConfig.maxOutputTokens === 1600, 'v84.2 明確預算:額度疊加思考預算');
+globalThis.fetch = async () => ({ ok: true, json: async () => ({ candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [] } }] }) });
+const rMax = await generateReply({ provider: 'gemini', apiKey: 'k', model: 'gemini-test', thinkingBudget: '', presets: [] }, { system: 's', messages: [], meta: {} });
+t(!rMax.ok && /思考/.test(rMax.message) && !/審查/.test(rMax.message.slice(0, 10)), 'v84.2 MAX_TOKENS 講真話,不誤導成審查');
+
 summary('JSON 救援');

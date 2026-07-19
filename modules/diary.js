@@ -30,10 +30,15 @@ export async function deleteDiary(characterId, diaryId) {
   await persist();
 }
 
-export function diaryCooldownLeft() {
+export function diaryCooldownLeft(characterId = null) {
+  // v84.5(擁有者核准):冷卻改「每個角色各自計」+ 2 分鐘(原全域 10 分鐘);
+  // 隱藏設定 settings.sideCooldownMin 可調,無 UI。
   const state = getState();
-  const cooldownMs = (state.settings.autoPostCooldownMin ?? 10) * 60000;
-  return Math.max(0, Math.ceil(((state.diaryLastRefresh || 0) + cooldownMs - Date.now()) / 1000));
+  const cooldownMs = (state.settings.sideCooldownMin ?? 2) * 60000;
+  const last = characterId
+    ? (state.diaryLastRefreshByChar?.[characterId] || 0)
+    : (state.diaryLastRefresh || 0); // 未帶 id=舊語意(相容既有呼叫點)
+  return Math.max(0, Math.ceil((last + cooldownMs - Date.now()) / 1000));
 }
 
 /** 這個角色「知道」的近期脈絡(自己的 DM + 參與的群聊/正文，各取尾段)。 */
@@ -107,11 +112,10 @@ export async function generateDiary(characterId, opts = {}) {
   const character = getCharacter(characterId);
   if (!character) return { ok: false, message: '找不到角色' };
   if (!opts.force) {
-    const left = diaryCooldownLeft();
-    if (left > 0) return { ok: false, message: `再等 ${Math.ceil(left / 60)} 分鐘可以再翻他的日記` };
+    const left = diaryCooldownLeft(characterId);
+    if (left > 0) return { ok: false, message: `再等 ${Math.max(1, Math.ceil(left / 60))} 分鐘可以再翻他的日記` };
   }
-  state.diaryLastRefresh = Date.now();
-  await persist();
+  // v84.5:冷卻移到「成功之後」才起算——舊版在生成前就燒掉,被安全過濾擋下還要白等十分鐘(擁有者實案)
 
   const cfg = getApiConfig();
   let content = '';
@@ -133,6 +137,8 @@ export async function generateDiary(characterId, opts = {}) {
 
   const entry = { id: genId('dia'), content, createdAt: Date.now() };
   getDiaries(characterId).unshift(entry);
+  if (!state.diaryLastRefreshByChar) state.diaryLastRefreshByChar = {};
+  state.diaryLastRefreshByChar[characterId] = Date.now(); // 成功才計,且只鎖這個角色
   await persist();
   return { ok: true, entry };
 }

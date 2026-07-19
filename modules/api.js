@@ -160,7 +160,16 @@ export function buildChatRequest(cfg, { system, messages, meta }) {
     ? String(cfg.baseUrl || '').replace(/\/+$/, '')
     : PROVIDERS[cfg.provider]?.base || '';
   // 中文約 1 字 1~2 token,寬鬆抓 2 倍再設上限
-  const maxTokens = Math.min(8192, Math.max(256, Math.round((meta?.maxReplyChars || 800) * 2)));
+  let maxTokens = Math.min(8192, Math.max(256, Math.round((meta?.maxReplyChars || 800) * 2)));
+  // v84.2:Gemini 2.5 的思考(thinking)token「計入」maxOutputTokens——心聲/偷看這類
+  // 小額度任務(600 tokens)會被思考整份吃光,回空內容、finishReason=MAX_TOKENS,
+  // 舊版誤報成「內容審查誤判」(擁有者實案:健康內容也連環被擋)。
+  // 對策:思考未關時給足 headroom;thinkingBudget=0(已關思考)維持原額度不多花錢。
+  if (cfg.provider === 'gemini') {
+    const tb = cfg.thinkingBudget;
+    if (tb === '' || tb === null || tb === undefined) maxTokens = Math.max(maxTokens, 4096); // 模型自管思考:保底
+    else if (Number(tb) > 0) maxTokens = Math.min(16384, maxTokens + Number(tb)); // 明確預算:疊加
+  }
 
   const model = normalizeModel(cfg.provider, cfg.model);
 
@@ -319,12 +328,15 @@ export async function generateReply(cfg, prompt, opts = {}) {
           return {
             ok: false,
             blocked: true,
-            message: `被供應商的安全過濾攔下(${blockReason || finishReason};非格式問題,重按不會有效)。可以:到 API 設定調寬「內容安全等級」,或改寫最近一句再送。`,
+            message: `被供應商的安全過濾攔下(${blockReason || finishReason};非格式問題)。過濾有隨機性,重按偶爾會過;常被咬的話更有效的是:到 API 設定調寬「內容安全等級」,或改寫最近一句再送。`,
           };
         }
       }
       const text = extractReplyText(cfg.provider, data).trim();
       recordUsage(cfg.provider, data, prompt.meta); // v81(f3):token 用量入帳(失敗靜默,不影響回覆)
+      if (!text && cfg.provider === 'gemini' && data?.candidates?.[0]?.finishReason === 'MAX_TOKENS') {
+        return { ok: false, message: '輸出額度被思考(thinking)吃光了,不是內容審查——再按一次通常就好;常發生的話到 API 設定把 thinkingBudget 設 0(關思考)或調低。' };
+      }
       if (!text) return { ok: false, message: '這一則被模型服務暫時擋下(內容審查誤判或長度不足),再試一次通常就好——與你的內容無關。' };
       const cap = prompt.meta?.maxReplyChars || 800;
       return { ok: true, text: text.length > cap ? `${text.slice(0, cap)}…` : text };

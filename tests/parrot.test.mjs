@@ -76,6 +76,14 @@ const s10 = splitChatParts('第一則\n---\n甲:第二則', ['甲']);
 t(s10.length === 2 && s10[1] === '第二則', 'v77 拆條後每則行首「名字:」補剝(不要求後跟時間戳)');
 t(splitChatParts('他說甲:你好,我笑了', ['甲'])[0] === '他說甲:你好,我笑了', 'v77 防誤傷:句中轉述「名字:」不剝(僅則首)');
 
+// --- v84.3:草稿收件人守門(模型把「誰寫給誰」搞混,吐出寄給自己的草稿) ---
+const { sanitizeDraftSnapshot: sds843 } = await import('../modules/phonepeek.js');
+const draftRaw = 'To:莫映里||今晚去你家||好想見他\nTo:謝子勳||帶妳吃熱炒||想炫耀\n鄭翰元||留空檔||尷尬';
+const draftOut = sds843(draftRaw, '謝子勳');
+t(!draftOut.includes('熱炒') && draftOut.includes('莫映里') && draftOut.includes('鄭翰元'), 'v84.3 自寄草稿丟棄,合法收件人保留');
+t(sds843('子勳||嗨||怪', '謝子勳') === '', 'v84.3 簡稱自寄也擋(模糊互含)');
+t(sds843(draftRaw).split('\n').length === 3, 'v84.3 未帶角色名=不誤丟(向後相容)');
+
 // --- v81:走鐘偵測器+卡片體檢(f1/e3/f2 共用;只偵測不硬剝) ---
 const { assessDmDrift, auditCharacterCard } = await import('../modules/quality.js');
 const novel = '陳以彥:(他放下手中的小泡芙,看著她那張因為不高興而微微撅起的嘴,沉默了兩秒,最終還是無奈地嘆了口氣,隨手將手機擱在桌面上。)\n\n「抱歉。」(他伸手揉了揉她的頭髮,視線卻忍不住掃過她纖細的頸項,聲音變得低沉。)';

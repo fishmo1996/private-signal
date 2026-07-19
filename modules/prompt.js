@@ -468,6 +468,7 @@ export function buildGroupPrompt({ roomId, mentionName = null, selfTalk = false 
       + '2~5 則，有來有往，可以互虧、可以歪樓；不要對玩家喊話，也不要代替玩家發言。',
     ] : []),
     ...(mentionName ? [`【點名】玩家在訊息中 @ 了「${mentionName}」：他必須回應；其他人可以補充，也可以不出聲。`] : []),
+    '【身分鐵條】每位角色的發言必須符合「自己」的個性、口癖、經歷與關係立場——絕不可把其他成員的個性、經歷或說話方式安在自己身上。',
     state.apiConfig?.promptLang === 'en' // v78:骨架語言開關(內容血肉仍中文;兩版語意必須同步)
       ? '【Output Format】Output ONLY a JSON array — no other text, no markdown fences: '
         + '[{"name":"角色名","content":"訊息內容"}]. '
@@ -716,6 +717,51 @@ function collectCrossRoomContext(character, currentRoomId) {
  * 素材=該角色「本人知道的範圍」：他的私密記憶+圈子共享+該房可見素材+
  * 歷史裁切到該則訊息。正文用劇情時間(不注入相對時間);群聊用現實時間。
  * ------------------------------------------------------------ */
+/**
+ * v85(j1):群聊 @點名的「單人呼叫」prompt——玩家 @某角色時只為他一人生成,
+ * DM 等級認知(完整卡+本人私密記憶+關係階段),結構性根治整包生成的「人設互滲」
+ * (擁有者實案:@楊皓,楊皓用子勳的人設回話)。輸出仍是群組公開發言→強制含蓄。
+ */
+export function buildGroupSoloPrompt({ roomId, characterId }) {
+  const state = getState();
+  const room = getRoom(roomId);
+  const character = getCharacter(characterId);
+  if (!room || room.type !== 'group' || !character) return null;
+  const persona = personaForRoom(room);
+  const participants = getRoomCharacters(room);
+  const privates = (state.memories.byCharacterId?.[character.id] || []).slice(0, 12);
+  const shared = sharedMemoriesFor(character.knownPersonaId || state.defaultPersonaId);
+  const roomMems = state.memories.byRoomId?.[roomId] || [];
+  const dmRoom = state.rooms.find((r) => r.type === 'dm' && !r.branchedFrom && r.participantIds.includes(character.id));
+  const srcMsgs = getRoomMessages(roomId) || [];
+  const recentMessages = budgetSlice(srcMsgs).map((m) => ({
+    role: m.role === 'user' ? 'user' : 'assistant',
+    speaker: m.role === 'user' ? (persona?.name || '玩家') : (getCharacter(m.senderId)?.name || ''),
+    content: m.content,
+  }));
+  const recentText = srcMsgs.slice(-8).map((m) => m.content).join('\n');
+  const lore = matchEntries({ characterId: character.id, roomId, recentText, presentNames: participants.map((pp) => pp.name) });
+
+  const system = [
+    ...globalPromptSection(roomId),
+    `這是群組「${room.title}」。玩家「${persona?.name || '(未命名)'}」在群裡點名(@)了你——「${character.name}」。這一輪只有你回覆。`,
+    `【你的角色設定】${character.systemPrompt || character.description || '(未提供)'}`,
+    `【個性】${character.personality || '(未提供)'}${character.emojiStyle?.trim() ? `\n【Emoji 習慣】${character.emojiStyle.trim()}` : ''}`,
+    `【玩家】${persona?.name || '(未命名玩家)'}:${persona?.description || '(未提供描述)'}`,
+    ...(privates.length ? [`【你的私密記憶(只有你自己知道,群裡其他人不知道)】\n${formatMemories(privates, { withRelativeTime: true })}`] : []),
+    `【共享記憶】\n${formatMemories(shared, { withRelativeTime: true })}`,
+    ...(roomMems.length ? [`【本聊天室記憶】\n${formatMemories(roomMems)}`] : []),
+    ...(dmRoom?.relationshipStage?.trim() ? [`【你與玩家目前的關係階段】${dmRoom.relationshipStage.trim()}(背景理解,不要複述)`] : []),
+    ...(lore.length ? [`【世界書】\n${lore.map((e) => `- ${e.content}`).join('\n')}`] : []),
+    ...nowSection(srcMsgs.slice(-1)[0]?.createdAt || null),
+    '【回覆指令】以「你自己」的個性、口癖與立場回覆——絕對不可混入其他成員的個性、經歷或說話方式。'
+      + '手機群聊口吻:1~3 則短訊息(每則 ≤100 字),訊息之間用單獨一行「---」分隔;行首絕不加自己的名字;禁止第三人稱旁白。'
+      + '這是群組,所有人都看得到——涉及你和玩家兩人的私事要像真人一樣含蓄:不點破、不貼私訊內容、不寫明私密細節。',
+  ].join('\n\n');
+
+  return { system, messages: recentMessages, meta: { maxReplyChars: 300, roomType: 'group', mode: 'group-solo', roomId } };
+}
+
 export function buildRoomInnerVoicePrompt({ character, roomId, messageId }) {
   const state = getState();
   const room = getRoom(roomId);
@@ -748,7 +794,17 @@ export function buildRoomInnerVoicePrompt({ character, roomId, messageId }) {
     ...(roomMems.length ? [`【本${isStory ? '場景' : '聊天室'}記憶】\n${formatMemories(roomMems)}`] : []),
     ...(isStory && room.statusBar?.trim() ? [`【當前狀態(劇情時間/地點/狀態，以此為準)】${room.statusBar.trim()}`] : []),
     ...(room.relationshipStage?.trim() ? [`【目前與玩家的關係階段】${room.relationshipStage.trim()}(背景理解，不要複述)`] : []),
-    `【任務】以下是${isStory ? '一段正文場景' : '一段群組聊天'}的紀錄(「旁白」是場景敘述)。請寫出紀錄最後那一刻，你(${character.name})心裡真正的想法——這一幕底下你沒說出口的部分(動作洩漏的、語氣藏著的、不敢講的)。第一人稱純內心獨白,100~200 字${isStory ? ',以劇情當下的時空為準，不要提及現實日期' : ''}。不要對任何人喊話、不要引號包裹、不要描述自己的動作、不要任何標記格式。輸出繁體中文。`,
+    // v84.4:任務改「引述錨定」——舊版用「最後那一刻」以位置指涉,群聊多人聲線交錯時
+    // 模型偶爾滑掉,寫成別的成員的內心(擁有者實案:皓的發言點開心聲是子勳)。直接引用
+    // 目標句+身分硬規則,錨死「這句是你說的、心聲必須是你的」。
+    (() => {
+      const targetMsg = (getRoomMessages(roomId) || []).find((mm) => mm.id === messageId);
+      const excerpt = String(targetMsg?.content || '').slice(0, 60);
+      const anchor = targetMsg?.role === 'character'
+        ? `紀錄最後一則「${excerpt}${String(targetMsg?.content || '').length > 60 ? '…' : ''}」是你(${character.name})本人說的。請寫出你說出這句話的那一刻`
+        : `請寫出紀錄最後那一刻`;
+      return `【任務】以下是${isStory ? '一段正文場景' : '一段群組聊天'}的紀錄(「旁白」是場景敘述)。${anchor},你(${character.name})心裡真正的想法——這一幕底下你沒說出口的部分(動作洩漏的、語氣藏著的、不敢講的)。這段心聲必須是「${character.name}」本人的第一人稱——絕對不要寫成其他成員的內心,不要替任何其他人發聲。純內心獨白,100~200 字${isStory ? ',以劇情當下的時空為準，不要提及現實日期' : ''}。不要對任何人喊話、不要引號包裹、不要描述自己的動作、不要任何標記格式。輸出繁體中文。`;
+    })(),
   ].join('\n\n');
 
   return { system, messages: recentMessages, meta: { maxReplyChars: 300, roomType: room.type, mode: 'innerVoice', roomId } };
@@ -775,7 +831,7 @@ export function buildPhonePeekPrompt({ character, peekType }) {
     : [];
 
   const TASKS = {
-    draft: `【任務】想像你(${character.name})的手機訊息 App 裡，躺著幾則「打了又沒送出」的草稿。輸出 2~4 則：大多是想傳給${persona?.name || '玩家'}的，可以有一則是給你認識的其他人。每行一則，格式三欄：收件人||草稿內容||一句沒送出的原因(內心註記)。草稿的語氣必須符合你平常的訊息風格與目前的關係階段；沒送出的原因要誠實(遲疑、害羞、覺得太黏、時機不對……)。每一行三欄都必須齊全：不要輸出缺收件人或缺草稿內容的行,不要輸出只有內心註記的行。`,
+    draft: `【任務】想像你(${character.name})的手機訊息 App 裡，躺著幾則「打了又沒送出」的草稿。輸出 2~4 則：大多是想傳給${persona?.name || '玩家'}的，可以有一則是給你認識的其他人。每行一則，格式三欄：收件人||草稿內容||一句沒送出的原因(內心註記)。草稿的語氣必須符合你平常的訊息風格與目前的關係階段；沒送出的原因要誠實(遲疑、害羞、覺得太黏、時機不對……)。每一行三欄都必須齊全：不要輸出缺收件人或缺草稿內容的行,不要輸出只有內心註記的行。收件人絕對不能是你自己(${character.name})——沒有人會傳訊息給自己;每一則草稿與內心註記都是「你」的第一人稱視角,絕不要替收件人或任何其他人代筆他們想傳的訊息。`,
     search: `【任務】輸出你(${character.name})手機瀏覽器「最近的搜尋紀錄」5~8 條，由最近到較早。每行一條搜尋關鍵字，像真人會打的那樣(可以口語、可以打錯重搜、可以好笑、可以洩露口是心非)。這些搜尋要反映你最近真正掛心的事。每行必須是「純搜尋關鍵字」：不要開場白、不要對任何人說話、不要括號動作或旁白描寫、不要任何說明句;不要複述你們對話裡說過的句子(搜尋紀錄不是訊息),也不要輸出「---」或任何分隔線。搜尋條目不要包含你自己的名字或自稱——沒有人會用自己的名字當每條搜尋的開頭。你認識的人也不會出現在你的搜尋裡：你不需要上網查你早就認識的人是誰。`,
     playlist: `【任務】輸出你(${character.name})音樂 App 的「最近播放」5~6 首。每行一首，格式：歌名 — 歌手。優先使用真實存在的歌曲與歌手(只列歌名與歌手，絕不要輸出任何歌詞)，選歌要符合你的品味與此刻心境；想不到合適的真歌時，可以混入虛構的，但要聽起來像真的存在。最後另起一行，以「循環理由：」開頭，寫一句你此刻反覆播放這些歌的原因。`,
   };

@@ -112,4 +112,21 @@ noLeak(solo83A, '指名回覆(甲)', LABELS); // 備註標籤永不進 prompt(H7
 const solo83B = flat(solo83({ post: post83, character: B, triggerText: 'x' }));
 t(!solo83B.includes('K9') && !solo83B.includes('H7'), '指名回覆(乙):拿不到甲的記憶與甲的 DM');
 
+
+// --- v85(j1/k2):群聊 @單人呼叫的兩級隱私+記憶寫入綁圈 ---
+const { buildGroupSoloPrompt } = await import('../modules/prompt.js');
+const gs85A = flat(buildGroupSoloPrompt({ roomId: g.id, characterId: A.id }));
+t(gs85A.includes('K9') && /S79/.test(gs85A), '群@單人(甲):本人私密記憶+關係階段進得來(j1 正控制)');
+noLeak(gs85A, '群@單人(甲)', LABELS);
+const gs85B = flat(buildGroupSoloPrompt({ roomId: g.id, characterId: B.id }));
+t(!gs85B.includes('K9') && !gs85B.includes('H7'), '群@單人(乙):拿不到甲的記憶與甲的 DM');
+const pkg85 = flat(buildGroupPrompt({ roomId: g.id }));
+t(!pkg85.includes('K9'), '群整包:私密記憶依然滴水不漏(j1 未動 A 級牆)');
+// k2:群事件寫入綁圈
+const { addSharedMemoryFromGroup, sharedMemoriesFor: smf85 } = await import('../modules/memory.js');
+await addSharedMemoryFromGroup('圈內事件M85', g.id);
+const gCircle = (await import('../modules/persona.js')).personaForRoom(g)?.id;
+t(smf85(gCircle).some((m) => m.content.includes('M85')), 'k2:群事件寫入本圈看得到');
+t(!smf85('psn_other_circle').some((m) => m.content.includes('M85')), 'k2:群事件寫入不再是全域(他圈看不到)');
+
 summary('隱私鐵律');

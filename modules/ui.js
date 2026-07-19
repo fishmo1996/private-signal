@@ -353,9 +353,18 @@ function renderChatApp(tab) {
       : '<button class="header-action" id="btnHeaderAdd">＋ 建立聊天室</button>');
 
   const listHtml = tab === 'friends' ? friendRowsHtml() : (tab === 'peek' ? peekRowsHtml() : groupRowsHtml());
+  queueMicrotask(() => els.phoneScreen.querySelector('#btnBackupNow')?.addEventListener('click', () => exportBackupNow()));
+
+  // v86(n1):備份保命橫幅——警示原本只在管理頁,人不在那就看不到;搬到最常待的聊天列表。
+  const bkDays = state.lastBackupAt ? Math.floor((Date.now() - state.lastBackupAt) / 864e5) : null;
+  const hasData = Object.values(state.messagesByRoom || {}).some((arr) => (arr || []).length > 3);
+  const backupBanner = hasData && (bkDays === null || bkDays >= 7)
+    ? `<button class="backup-banner" id="btnBackupNow">⚠ ${bkDays === null ? '從未備份' : `已 ${bkDays} 天沒備份`}——所有資料只在這台裝置的瀏覽器裡,點我一鍵匯出</button>`
+    : '';
 
   els.phoneScreen.innerHTML = `
     ${appHeader('聊天', { rightHtml })}
+    ${backupBanner}
     <div class="api-status" id="chatStatus" role="status" style="padding:0 16px"></div>
     <div class="phone-list with-tabbar">${listHtml}</div>
     <div class="tabbar" role="tablist" aria-label="聊天分頁">
@@ -584,8 +593,10 @@ function renderRoomView() {
         ${getState().settings.quickReplies.map((q, i) => `<button class="mini-btn" data-quick="${i}">${esc(q)}</button>`).join('')}
       </div>` : ''}
     <div class="attach-preview" id="attachPreview" hidden>
-      <img id="attachImg" alt="待傳送的圖片">
-      <button class="mini-btn danger" id="btnAttachClear">移除</button>
+      <div class="attach-chip">
+        <img id="attachImg" alt="待傳送的圖片">
+        <button class="attach-x" id="btnAttachClear" aria-label="移除圖片">×</button>
+      </div>
     </div>
     <div class="composer">
       <input type="file" id="attachFile" accept="image/*" hidden>
@@ -730,14 +741,22 @@ function renderRoomView() {
     if (!file) return;
     try {
       pendingImage = await compressPhoto(file);
+      if (!String(pendingImage || '').startsWith('data:image/')) throw new Error('這張圖讀不進來(常見於 HEIC 格式)——換成 JPG/PNG,或先截圖再傳。');
       attachPreview.hidden = false;
       els.phoneScreen.querySelector('#attachImg').src = pendingImage;
-    } catch (err) { alert(err.message); }
+    } catch (err) { pendingImage = null; attachPreview.hidden = true; alert(err.message); }
     attachFile.value = '';
   });
   els.phoneScreen.querySelector('#btnAttachClear')?.addEventListener('click', () => {
     pendingImage = null;
     attachPreview.hidden = true;
+  });
+  // v84.1:縮圖破圖防呆——src 無效(HEIC 等)就收掉,不留破圖 icon+大字橫幅
+  els.phoneScreen.querySelector('#attachImg')?.addEventListener('error', () => {
+    if (attachPreview.hidden) return;
+    pendingImage = null;
+    attachPreview.hidden = true;
+    alert('這張圖讀不進來(常見於 HEIC 格式)——換成 JPG/PNG,或先截圖再傳。');
   });
 
   const doSend = async () => {
@@ -815,6 +834,7 @@ function renderMessages() {
     ? `<div class="load-older-wrap"><button class="ghost-btn slim" id="btnLoadOlder">↑ 載入更早的 ${Math.min(MSG_WINDOW_STEP, hiddenCount)} 則(還有 ${hiddenCount} 則)</button></div>`
     : '';
   const showTime = state.settings.showTimestamps !== false;
+  const lastUserIdx = msgs.map((mm) => mm.role).lastIndexOf('user'); // v86(n3):已讀標記用
 
   const html = msgs.map((m, i) => {
     const time = showTime ? `<span class="msg-time">${fmtTime(m.createdAt)}</span>` : '';
@@ -833,10 +853,16 @@ function renderMessages() {
         ? `<button class="remember-btn" data-inner-voice="${esc(m.id)}" aria-label="心聲">👁${(m.innerVoice || (m.innerVoices && Object.keys(m.innerVoices).length)) ? '' : '?'}</button>` : '')
       + `<button class="remember-btn danger" data-msg-del="${esc(m.id)}" aria-label="刪除訊息">刪除</button>`;
 
-    // v84(質感):同一人連發分組——非首則隱藏頭像與名字、縮小間距(有時間分組線就斷組)
+    // v84(質感)/v86 修:同一人連發分組——v84 誤把「showTime(全域時間戳設定)」當成
+    // 分組線旗標,預設開=cont 永遠 false,分組從未生效(擁有者截圖佐證)。改用真正的
+    // 語意:同人+間隔 <5 分鐘才算連發。
     const prevM = i > 0 ? msgs[i - 1] : null;
     const cont = !!prevM && prevM.role === m.role && prevM.senderId === m.senderId
-      && !showTime && m.role !== 'system' && prevM.role !== 'narrator' && !m.missedCall;
+      && ((m.createdAt || 0) - (prevM.createdAt || 0) < 5 * 60000)
+      && m.role !== 'system' && prevM.role !== 'narrator' && !m.missedCall;
+    // v86(n3):跨日分隔章——日期變了插一顆置中小章(今天/昨天/M月D日)
+    const dateChip = (!prevM || new Date(prevM.createdAt || 0).toDateString() !== new Date(m.createdAt || 0).toDateString())
+      ? `<div class="msg-date-chip">${fmtDateChip(m.createdAt)}</div>` : '';
 
     if (m.role === 'system') {
       return `<div class="msg-system">${esc(m.content)}
@@ -860,14 +886,19 @@ function renderMessages() {
       </div>` : '';
     if (m.role === 'user') {
       return `
+        ${dateChip}
         <div class="msg-row user${cont ? ' cont' : ''}">
           <div class="bubble user-bubble">${shareHtml}${imgHtml}${esc(m.content).replaceAll('\n', '<br>')}</div>
-          <div class="msg-meta">${time}${rememberBtn}${speakBtn}</div>
+          <div class="msg-meta">${
+  (room.type !== 'story' && i === lastUserIdx)
+    ? `<span class="msg-read">${msgs.slice(i + 1).some((x) => x.role === 'character') ? '已讀' : '已送達'}</span>` : ''
+}${time}${rememberBtn}${speakBtn}</div>
         </div>`;
     }
     const c = getCharacter(m.senderId);
     const nameLine = (room.type === 'dm' || cont) ? '' : `<div class="msg-sender">${esc(c ? c.name : '角色')}</div>`;
     return `
+      ${dateChip}
       <div class="msg-row character${cont ? ' cont' : ''}">
         ${avatarHtml(c, 'sm')}
         <div class="msg-col">
@@ -1140,7 +1171,7 @@ function bindFeedEvents(root) {
   root.querySelectorAll('[data-remember-post]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const p = getPost(btn.dataset.rememberPost);
-      if (p) openSharedMemoryModal(`${authorName(p.authorId)}在社群發文:${p.content}`);
+      if (p) openSharedMemoryModal(`${authorName(p.authorId)}在社群發文:${p.content}`, circleOfPostUi(p));
     });
   });
 }
@@ -1356,7 +1387,7 @@ function renderSocialPost() {
   els.phoneScreen.querySelectorAll('[data-remember-comment]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const cm = comments.find((c) => c.id === btn.dataset.rememberComment);
-      if (cm) openSharedMemoryModal(`${authorName(cm.authorId)}在社群留言:${cm.content}`);
+      if (cm) openSharedMemoryModal(`${authorName(cm.authorId)}在社群留言:${cm.content}`, circleOfPostUi(post));
     });
   });
 
@@ -2140,6 +2171,31 @@ function isTouchDevice() {
   try { return globalThis.matchMedia?.('(pointer: coarse)')?.matches === true; } catch { return false; }
 }
 
+/** v86(n1):一鍵全域備份(設定頁與過期橫幅共用)。 */
+function exportBackupNow() {
+  const state = getState();
+  const blob = new Blob([exportStateJson()], { type: 'application/json' });
+  const a = document.createElement('a');
+  const d = new Date();
+  a.href = URL.createObjectURL(blob);
+  a.download = `private-signal-backup-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  state.lastBackupAt = Date.now();
+  persist().then(() => renderPhone());
+}
+
+/** v86(n3):跨日分隔章文字(今天/昨天/M月D日)。 */
+function fmtDateChip(ts) {
+  const d = new Date(ts || Date.now());
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const that = new Date(d); that.setHours(0, 0, 0, 0);
+  const diff = Math.round((today - that) / 864e5);
+  if (diff === 0) return '今天';
+  if (diff === 1) return '昨天';
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
 function downloadJson(text, filename) {
   const blob = new Blob([text], { type: 'application/json' });
   const a = document.createElement('a');
@@ -2649,7 +2705,8 @@ function renderSettings() {
         return `<div class="backup-warn">⚠ ${at ? `已 ${days} 天沒備份` : '從未備份'}——iOS 有權在空間吃緊時清掉網站資料，備份是唯一保險。</div>`;
       })()}
       <div class="form-actions">
-        <button class="primary-btn slim" id="btnExport">匯出全域備份</button>
+        <div class="panel-note" id="persistState">持久儲存狀態查詢中…</div>
+      <button class="primary-btn slim" id="btnExport">匯出全域備份</button>
         <button class="ghost-btn slim" id="btnImport">匯入備份</button>
         <input type="file" id="importFile" accept="application/json,.json" hidden>
       </div>
@@ -2926,17 +2983,18 @@ function renderSettings() {
   });
 
   // 資料：全域備份匯出/匯入
-  els.phoneScreen.querySelector('#btnExport').addEventListener('click', () => {
-    const blob = new Blob([exportStateJson()], { type: 'application/json' });
-    const a = document.createElement('a');
-    const d = new Date();
-    a.href = URL.createObjectURL(blob);
-    a.download = `private-signal-backup-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    state.lastBackupAt = Date.now();
-    persist().then(() => renderPhone());
-  });
+  els.phoneScreen.querySelector('#btnExport').addEventListener('click', () => exportBackupNow());
+  // v86(n1):顯示瀏覽器持久儲存允諾狀態
+  (async () => {
+    const el = els.phoneScreen.querySelector('#persistState');
+    if (!el) return;
+    try {
+      const ok = await navigator.storage?.persisted?.();
+      el.textContent = ok
+        ? '瀏覽器已允諾持久儲存 ✓(被自動清除的機率大幅降低,仍建議定期備份)'
+        : '瀏覽器尚未允諾持久儲存——空間吃緊時資料可能被清,定期備份是唯一保險。';
+    } catch { el.textContent = ''; }
+  })();
   const importFile = els.phoneScreen.querySelector('#importFile');
   els.phoneScreen.querySelector('#btnImport').addEventListener('click', () => importFile.click());
   importFile.addEventListener('change', () => {
@@ -4367,25 +4425,39 @@ function openEditMessageModal(roomId, msg) {
 }
 
 /** 從社群貼文/留言建立「共享」記憶(社群是公開空間，只能進 shared)。 */
-function openSharedMemoryModal(text) {
+/** v85(k2):貼文所屬圈子(與 prompt 端 circleOfPost 同語意)。 */
+function circleOfPostUi(p) {
+  if (!p) return getState().defaultPersonaId || null;
+  if (p.personaId) return p.personaId;
+  if (p.authorId !== 'player') return getCharacter(p.authorId)?.knownPersonaId || getState().defaultPersonaId || null;
+  return getState().defaultPersonaId || null;
+}
+
+function openSharedMemoryModal(text, circleId = null) {
+  // v85(k2):社群記住預設綁「該貼文的圈子」——舊版沒帶 circleId=寫成全域,
+  // A 世界的社群事件漏進 B 世界(擁有者回報的污染源本尊)。全域改為手動勾選。
   const raw = String(text || '').trim().replace(/\s+/g, ' ');
   const content = raw.length > 80 ? raw.slice(0, 80) + '…' : raw;
+  const circle = circleId ? getPersona(circleId) : null;
 
   openModal(`
     <h3>記住這件事</h3>
-    <p class="panel-note">這是社群內容的原文截取。社群屬於公開空間，這條記憶會存成「共享記憶」，所有角色可見。</p>
+    <p class="panel-note">這是社群內容的原文截取，會存成「共享記憶」。</p>
     <label class="field">記憶內容
       <textarea id="memCandidate" rows="4">${esc(content)}</textarea>
     </label>
-    <div class="field-label">可見範圍：共享記憶(所有角色可見)</div>
+    <div class="field-label">可見範圍：${circle ? `圈子「${esc(circle.name)}」(這個世界觀的角色可見)` : '全域(所有世界觀可見)'}</div>
+    ${circle ? '<label class="field check-row"><input type="checkbox" id="memGlobal"> 改存成全域(所有世界觀可見——跨世界都成立的事實才建議)</label>' : ''}
     <div class="form-actions">
       <button class="primary-btn slim" id="memSave">存入記憶</button>
     </div>`, {
     onOpen(root) {
       root.querySelector('#memSave').addEventListener('click', async () => {
+        const asGlobal = !!root.querySelector('#memGlobal')?.checked;
         await addMemory({
           content: root.querySelector('#memCandidate').value,
           visibility: 'shared',
+          circleId: asGlobal ? null : circleId,
           sourceRoomId: null,
         });
         closeModal();

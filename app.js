@@ -24,6 +24,17 @@ async function boot() {
     await initDB();
     await initState(config);
 
+    // v86(n1):向瀏覽器請求「持久儲存」——未允諾時 iOS/桌面瀏覽器有權在空間吃緊時
+    // 清掉整個 IndexedDB(全部心血)。允諾後被清的機率大幅下降;結果印在 console,
+    // 設定頁的備份區也會顯示。失敗靜默,不影響開機。
+    try {
+      if (navigator.storage?.persist) {
+        navigator.storage.persist().then((granted) => {
+          console.log(`[私人訊號] 持久儲存:${granted ? '已允諾 ✓' : '未允諾(定期備份更重要了)'}`);
+        });
+      }
+    } catch { /* 舊瀏覽器沒這 API,略過 */ }
+
     // 3. 決定啟動頁面:
     //    預設一律先進主畫面(home),避免被困在上次的聊天頁;
     //    只有在設定開啟「重新開啟時回到上次聊天室」且該 room 仍存在時才還原。

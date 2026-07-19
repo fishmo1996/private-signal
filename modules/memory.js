@@ -126,11 +126,13 @@ export async function deleteMemory(memoryId) {
   await persist();
 }
 
-/** 群聊公開事件寫入共享記憶(由群聊流程呼叫)。 */
+/** 群聊公開事件寫入共享記憶(由群聊流程呼叫)。v85(k2):預設綁本房圈子,不再寫全域。 */
 export async function addSharedMemoryFromGroup(content, roomId) {
+  const room = getRoom(roomId);
   return addMemory({
     content,
     visibility: 'shared',
+    circleId: (room && personaForRoom(room)?.id) || null,
     sourceRoomId: roomId,
   });
 }
