@@ -22,6 +22,7 @@ export async function addPhoto(data) {
     caption: String(data.caption || '').trim(),
     dateText: String(data.dateText || '').trim(),   // 自由文字:'2026/8/12' 或 '八月的海邊'
     characterIds: Array.isArray(data.characterIds) ? data.characterIds : [],
+    pinned: !!data.pinned, // v88:釘選——永遠留在角色的回憶視野裡
     createdAt: Date.now(),
   };
   getPhotos().unshift(photo);
@@ -35,6 +36,7 @@ export async function updatePhoto(id, patch) {
   if (patch.caption !== undefined) p.caption = String(patch.caption).trim();
   if (patch.dateText !== undefined) p.dateText = String(patch.dateText).trim();
   if (patch.characterIds !== undefined) p.characterIds = patch.characterIds;
+  if (patch.pinned !== undefined) p.pinned = !!patch.pinned; // v88
   await persist();
   return p;
 }
@@ -51,7 +53,9 @@ export async function deletePhoto(id) {
  * 沒有任何回憶時回傳 ''。
  */
 export function albumTextFor(characterId, limit = 6) {
-  const mine = getPhotos().filter((p) => p.characterIds.includes(characterId) && p.caption);
+  // v88:釘選的照片永遠優先進視野(舊版只取最近 6 張,早期重要回憶會默默掉出)
+  const mine = getPhotos().filter((p) => p.characterIds.includes(characterId) && p.caption)
+    .sort((a, b) => (Number(b.pinned || 0) - Number(a.pinned || 0)) || ((b.createdAt || 0) - (a.createdAt || 0)));
   if (!mine.length) return '';
   return mine.slice(0, limit)
     .map((p) => `- ${p.dateText ? `${p.dateText},` : ''}${p.caption}`)

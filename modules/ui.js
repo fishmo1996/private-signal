@@ -68,6 +68,8 @@ let socialTypingBy = '';      // 社群留言中的「正在輸入」提示
 let socialError = '';         // 社群 AI 留言失敗時的提示(顯示一次後清除)
 let replyTargetId = null;     // 正在行內回覆的留言 id(回覆框長在該留言底下)
 const expandedThreads = new Set(); // v79(b案):長樓已手動展開的樓主 id(session 內跨重繪保留)
+let albumFilterChar = null;   // v88:相簿角色籤(null=全部;session 內保留)
+let albumInfoOpen = false;    // v88:相簿說明是否展開(q3 收納)
 let clockTimer = null;
 
 /* ---------------- 小工具 ---------------- */
@@ -187,6 +189,7 @@ export function applyTheme() {
   const theme = getState().settings.theme || 'dusk';
   document.body.classList.toggle('theme-sage', theme === 'sage');
   document.body.classList.toggle('theme-berry', theme === 'berry');
+  document.body.classList.toggle('theme-forest', theme === 'forest'); // v89:森林墨綠(深色)
   const fs = getState()?.settings?.fontScale || 'normal';
   document.body.classList.remove('font-sm', 'font-lg', 'font-xl');
   if (fs === 'small') document.body.classList.add('font-sm');
@@ -604,6 +607,7 @@ function renderRoomView() {
         ${personaAvatarHtml(personaForRoom(room), 'sm')}
       </button>
       <button class="icon-btn attach-btn" id="btnAttach" aria-label="附加圖片">＋</button>
+      ${room.type === 'group' ? '<div class="mention-bar" id="mentionBar" hidden></div>' : ''}
       <textarea id="composerInput" rows="1"
         placeholder="${isStory ? '輸入台詞、行動或敘事…' : '輸入訊息…'}"
         aria-label="訊息輸入框"></textarea>
@@ -611,6 +615,30 @@ function renderRoomView() {
     </div>`}`;
 
   bindBack();
+  // v89(m2):群聊打「@」跳成員快選;點頭像插入全名(全名=硬保證單人呼叫的觸發鍵)
+  if (room.type === 'group') {
+    const inputEl = els.phoneScreen.querySelector('#composerInput');
+    const bar = els.phoneScreen.querySelector('#mentionBar');
+    const members = getRoomCharacters(room);
+    const updateBar = () => {
+      const mtc = inputEl.value.match(/@([^\s@]{0,8})$/);
+      if (!mtc) { bar.hidden = true; return; }
+      const kw = mtc[1];
+      const hits = members.filter((c) => !kw || c.name.includes(kw));
+      if (!hits.length) { bar.hidden = true; return; }
+      bar.innerHTML = hits.map((c) => `<button class="mention-chip" data-mention="${esc(c.id)}">${avatarHtml(c, 'xs')}${esc(c.name)}</button>`).join('');
+      bar.hidden = false;
+      bar.querySelectorAll('[data-mention]').forEach((b) => b.addEventListener('click', () => {
+        const c = members.find((x) => x.id === b.dataset.mention);
+        if (!c) return;
+        inputEl.value = inputEl.value.replace(/@([^\s@]{0,8})$/, `@${c.name} `);
+        bar.hidden = true;
+        inputEl.focus();
+      }));
+    };
+    inputEl.addEventListener('input', updateBar);
+    inputEl.addEventListener('blur', () => setTimeout(() => { bar.hidden = true; }, 200));
+  }
   els.phoneScreen.querySelector('#__noteProxy').addEventListener('click', () => openAuthorNoteModal(room));
   els.phoneScreen.querySelector('#btnRoomMore').addEventListener('click', () => {
     const items = [
@@ -1560,20 +1588,54 @@ function renderSearch() {
 function renderAlbum() {
   const state = getState();
   const photos = getPhotos();
+  // v88(角色籤):有被標註過的角色才出現;點籤=只看「我們的相簿」——同時天然隔離世界觀
+  // (擁有者每個世界各自建卡,籤=圈)。q5 篩選被此吸收。
+  const taggedIds = [...new Set(photos.flatMap((p) => p.characterIds || []))];
+  const tagChars = taggedIds.map((id) => getCharacter(id)).filter(Boolean);
+  if (albumFilterChar && !taggedIds.includes(albumFilterChar)) albumFilterChar = null;
+  const shown = albumFilterChar ? photos.filter((p) => (p.characterIds || []).includes(albumFilterChar)) : photos;
+  // v88(q2 月份分組):照 createdAt 分「YYYY年M月」段
+  const groups = [];
+  for (const p of shown) {
+    const d = new Date(p.createdAt || 0);
+    const key = `${d.getFullYear()}年${d.getMonth() + 1}月`;
+    if (!groups.length || groups[groups.length - 1].key !== key) groups.push({ key, items: [] });
+    groups[groups.length - 1].items.push(p);
+  }
+  const gridHtml = groups.map((g) => `
+    <div class="album-month">${esc(g.key)}</div>
+    <div class="album-grid">
+      ${g.items.map((p) => `
+        <button class="album-cell" data-open-photo="${esc(p.id)}" aria-label="檢視回憶">
+          <img src="${p.image}" alt="">
+          ${p.pinned ? '<span class="album-pin">📌</span>' : ''}
+          <span class="album-caption clamp2">${esc(p.caption || '(未命名)')}</span>
+        </button>`).join('')}
+    </div>`).join('');
+
   els.phoneScreen.innerHTML = `
     ${appHeader('相簿', { rightHtml: '<button class="header-action" id="btnAddPhoto">＋ 新增回憶</button>' })}
     <input type="file" id="photoFile" accept="image/*" hidden>
     <div class="phone-list">
-      <div class="panel-note" style="margin:0 2px 10px">照片只存在這台裝置；被標註在場的角色會「記得」描述文字，聊天中可分享照片給他看。</div>
-      ${photos.length ? `<div class="album-grid">
-        ${photos.map((p) => `
-          <button class="album-cell" data-open-photo="${esc(p.id)}" aria-label="檢視回憶">
-            <img src="${p.image}" alt="">
-            <span class="album-caption">${esc(p.caption || '(未命名)')}</span>
-          </button>`).join('')}
-      </div>` : '<div class="list-empty">還沒有回憶。跑完一場好劇情，幫它留一張照片吧。</div>'}
+      ${photos.length ? `
+        <div class="album-tabs">
+          <button class="album-tab ${albumFilterChar ? '' : 'active'}" data-album-tab="">全部</button>
+          ${tagChars.map((c) => `<button class="album-tab ${albumFilterChar === c.id ? 'active' : ''}" data-album-tab="${esc(c.id)}">${avatarHtml(c, 'xs')}${esc(c.name)}</button>`).join('')}
+          <button class="album-tab ghost" id="albumInfoBtn" aria-label="說明">ⓘ</button>
+        </div>
+        <div class="panel-note" style="margin:0 2px 10px" ${albumInfoOpen ? '' : 'hidden'}>照片只存在這台裝置；被標註在場的角色會「記得」描述文字，聊天中可分享照片給他看。釘選(📌)的回憶會永遠留在角色的記憶視野裡。</div>
+        ${shown.length ? gridHtml : '<div class="list-empty">這一冊還沒有回憶。</div>'}
+      ` : `
+        <div class="panel-note" style="margin:0 2px 10px">照片只存在這台裝置；被標註在場的角色會「記得」描述文字，聊天中可分享照片給他看。</div>
+        <div class="list-empty">還沒有回憶。跑完一場好劇情，幫它留一張照片吧。</div>
+      `}
     </div>`;
   bindBack();
+  els.phoneScreen.querySelectorAll('[data-album-tab]').forEach((b) => b.addEventListener('click', () => {
+    albumFilterChar = b.dataset.albumTab || null;
+    renderAlbum();
+  }));
+  els.phoneScreen.querySelector('#albumInfoBtn')?.addEventListener('click', () => { albumInfoOpen = !albumInfoOpen; renderAlbum(); });
 
   const photoFile = els.phoneScreen.querySelector('#photoFile');
   els.phoneScreen.querySelector('#btnAddPhoto').addEventListener('click', () => photoFile.click());
@@ -1587,10 +1649,41 @@ function renderAlbum() {
     } catch { alert('圖片讀取失敗'); }
   });
   els.phoneScreen.querySelectorAll('[data-open-photo]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const p = getPhotos().find((x) => x.id === btn.dataset.openPhoto);
-      if (p) openPhotoModal(p, p.image);
-    });
+    btn.addEventListener('click', () => openPhotoViewer(btn.dataset.openPhoto)); // v88(q6):先檢視,編輯在裡面
+  });
+}
+
+/** v88(q6):大圖檢視器——大圖+說明+日期+標註頭像;上一張/下一張沿當前籤的清單;釘選/編輯入口。 */
+function openPhotoViewer(photoId) {
+  const photos = getPhotos();
+  const listP = albumFilterChar ? photos.filter((pp) => (pp.characterIds || []).includes(albumFilterChar)) : photos;
+  const idx = listP.findIndex((x) => x.id === photoId);
+  const p = listP[idx];
+  if (!p) return;
+  const tagged = (p.characterIds || []).map((id) => getCharacter(id)).filter(Boolean);
+  openModal(`
+    <div class="viewer-top">
+      <span>${idx + 1} / ${listP.length}</span>
+      <button class="mini-btn" id="pvPin">${p.pinned ? '📌 取消釘選' : '📌 釘選'}</button>
+      <button class="mini-btn" id="pvEdit">✏️ 編輯</button>
+    </div>
+    <img class="album-full" src="${p.image}" alt="回憶照片">
+    <div class="viewer-caption">${esc(p.caption || '(未命名)')}</div>
+    ${p.dateText ? `<div class="panel-note">${esc(p.dateText)}</div>` : ''}
+    ${tagged.length ? `<div class="viewer-tags">${tagged.map((c) => `<span class="viewer-tag">${avatarHtml(c, 'xs')}${esc(c.name)}</span>`).join('')}</div>` : ''}
+    <div class="viewer-nav">
+      <button class="ghost-btn slim" id="pvPrev" ${idx <= 0 ? 'disabled' : ''}>← 上一張</button>
+      <button class="ghost-btn slim" id="pvNext" ${idx >= listP.length - 1 ? 'disabled' : ''}>下一張 →</button>
+    </div>`, {
+    onOpen(root) {
+      root.querySelector('#pvPin').addEventListener('click', async () => {
+        await updatePhoto(p.id, { pinned: !p.pinned });
+        openPhotoViewer(p.id);
+      });
+      root.querySelector('#pvEdit').addEventListener('click', () => openPhotoModal(p, p.image));
+      root.querySelector('#pvPrev')?.addEventListener('click', () => openPhotoViewer(listP[idx - 1].id));
+      root.querySelector('#pvNext')?.addEventListener('click', () => openPhotoViewer(listP[idx + 1].id));
+    },
   });
 }
 
@@ -2566,6 +2659,7 @@ function renderSettings() {
           <option value="dusk" ${state.settings.theme !== 'sage' ? 'selected' : ''}>暮霧(深色)</option>
           <option value="sage" ${state.settings.theme === 'sage' ? 'selected' : ''}>青霧(淺綠護眼)</option>
           <option value="berry" ${state.settings.theme === 'berry' ? 'selected' : ''}>甜莓(粉嫩，配可愛圖示包)</option>
+          <option value="forest" ${state.settings.theme === 'forest' ? 'selected' : ''}>森林(墨綠深色;自訂圖示自動轉綠,不喜歡可回報關掉)</option>
         </select>
       </label>
       <div class="setting-row">

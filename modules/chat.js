@@ -367,7 +367,24 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
       const cfgG = getApiConfig();
       const participants = getRoomCharacters(room);
       // @點名：訊息含「@角色名」時，該角色必回
-      const mentioned = participants.find((c) => text.includes(`@${c.name}`)) || null;
+      // v89(m2):@點名模糊比對——全名之外也認簡稱(名字的尾 1~2 字/去姓形),
+      // 各參與者取「命中的最長形」計分,最高分唯一者=點名;撞名歧義=放棄硬點名,
+      // 回落原本的軟點名(寧可不搶答,不可點錯人)。快選列插入的是全名,天然最高分。
+      const bareM = (x) => String(x || '').replace(/[^\p{Script=Han}A-Za-z0-9]/gu, '');
+      let mentioned = null;
+      {
+        let best = 0;
+        let tie = false;
+        for (const c of participants) {
+          const nb = bareM(c.name);
+          const forms = [...new Set([nb, nb.slice(1), nb.slice(-2), nb.slice(-1)])].filter((f) => f);
+          let score = 0;
+          for (const f of forms) if (f.length > score && text.includes(`@${f}`)) score = f.length;
+          if (!score) continue;
+          if (score > best) { best = score; mentioned = c; tie = false; } else if (score === best) tie = true;
+        }
+        if (tie) mentioned = null;
+      }
       if (cfgG.useRealApi && cfgG.apiKey && cfgG.model) {
         // v85(j1):@點名=單人呼叫(硬保證+DM 等級認知)——舊版點名只是整包生成裡的
         // 軟指令,會發生「@楊皓結果子勳回」甚至「楊皓穿子勳的人設回」(擁有者實案);

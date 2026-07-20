@@ -41,21 +41,38 @@ export function diaryCooldownLeft(characterId = null) {
   return Math.max(0, Math.ceil((last + cooldownMs - Date.now()) / 1000));
 }
 
-/** 這個角色「知道」的近期脈絡(自己的 DM + 參與的群聊/正文，各取尾段)。 */
+/**
+ * 這個角色「知道」的近期脈絡。
+ * v88(r1)擁有者實案「日記沒跟上聊天」三根因:①舊版每房只帶尾 6/4 則、每則截 60 字
+ * ——幾千字的重頭戲他只瞄到 ~300 字斷頭殘句(對比 DM 回覆有 20000 字預算);
+ * ②房間取「前 4 個」=建立順序非最近活躍,且沒排除分岔房——活躍房可能根本不在名單。
+ * 修:最近活躍排序+排除分岔;DM 尾 20 則、群/正文尾 8 則、每則截 120 字;
+ * 總量守門 4000 字控帳單(輕量模型跑這個量仍便宜)。
+ */
 function knownContextOf(character) {
   const state = getState();
   const persona = getPersona(character.knownPersonaId) || defaultPersona();
   const lines = [];
-  const rooms = state.rooms.filter((r) => r.participantIds.includes(character.id));
-  for (const r of rooms.slice(0, 4)) {
-    const msgs = getRoomMessages(r.id).slice(r.type === 'dm' ? -6 : -4);
+  let budget = 4000;
+  const rooms = state.rooms
+    .filter((r) => r.participantIds.includes(character.id) && !r.branchedFrom)
+    .map((r) => ({ r, last: getRoomMessages(r.id).slice(-1)[0]?.createdAt || 0 }))
+    .filter((x) => x.last > 0)
+    .sort((a, b) => b.last - a.last)
+    .slice(0, 4);
+  outer:
+  for (const { r } of rooms) {
+    const msgs = getRoomMessages(r.id).slice(r.type === 'dm' ? -20 : -8);
     if (!msgs.length) continue;
     lines.push(`《${r.type === 'dm' ? '私訊' : r.title}》`);
     for (const m of msgs) {
       const who = m.role === 'user' ? (persona?.name || '玩家')
         : m.senderId === character.id ? '我'
           : (getCharacter(m.senderId)?.name || '旁白');
-      lines.push(`${who}:${m.content.slice(0, 60)}`);
+      const line = `${who}:${String(m.content || '').slice(0, 120)}`;
+      if (budget - line.length <= 0) break outer;
+      budget -= line.length;
+      lines.push(line);
     }
   }
   return lines.join('\n') || '(最近沒什麼互動)';
@@ -91,6 +108,7 @@ export function buildDiaryPrompt(character, rng = Math.random) {
     `【大家都知道的事】\n${shared}`,
     `【世界觀】\n${loreText}`,
     `【寫作指令】第一人稱，寫給自己看——可以坦白你對「${persona?.name || '那個人'}」的真實想法，包括嘴上不會說的。`
+      + `日記必須圍繞【你最近經歷的對話】裡真實發生的「具體事件」寫——寫發生了什麼、你的感受與沒說出口的部分;不要脫離事件的泛泛抒情。`
       + `口吻要像私下的你，不是對外的你。只輸出日記內容本身，不要日期、不要名字前綴、不要引號包裹。`
       + rollLengthDirective('diary', rng),
   ].join('\n\n');

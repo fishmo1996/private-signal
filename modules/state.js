@@ -68,7 +68,7 @@ function migrate(s) {
   if (!s.settings) s.settings = {};
   if (s.settings.showLockScreen === undefined) s.settings.showLockScreen = false;
   if (s.settings.resumeLastRoom === undefined) s.settings.resumeLastRoom = false;
-  if (!s.settings.theme) s.settings.theme = 'dusk';        // dusk 暮霧深色 | sage 青霧淺綠
+  if (!s.settings.theme) s.settings.theme = 'dusk';        // dusk 暮霧深色 | sage 青霧淺綠 | berry 甜莓粉 | forest 森林墨綠(v89)
   if (s.settings.storyFormat === undefined) {
     s.settings.storyFormat = '玩家輸入中，括號()內為台詞，括號外為動作與敘述。你的輸出以第三人稱小說筆法呈現，角色對話用「」引號，不要模仿玩家的括號格式。';
   }
