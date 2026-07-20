@@ -5,6 +5,7 @@
  */
 
 import { getState, getConfig, getCharacter } from './state.js';
+import { esc } from '../utils/esc.js';
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -16,11 +17,7 @@ export function dateString(d = new Date()) {
   return `${d.getMonth() + 1} 月 ${d.getDate()} 日 星期${WEEKDAYS[d.getDay()]}`;
 }
 
-function esc(s) {
-  return String(s ?? '')
-    .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;').replaceAll("'", '&#39;');
-}
+// esc() 自 v91 起唯一實作在 utils/esc.js
 
 function firstLine(text, max) {
   const t = String(text || '').trim().split('\n')[0];
@@ -93,7 +90,7 @@ export function buildHomeHTML() {
   const iconOf = (app) => `
     <button class="app-icon tone-${app.tone}" data-go="${esc(app.view)}" aria-label="開啟${esc(app.label)}">
       <span class="app-glyph ${customIcons[app.id] ? 'has-img' : ''}" aria-hidden="true">${
-  customIcons[app.id] ? `<img src="${customIcons[app.id]}" alt="">` : app.glyph
+  customIcons[app.id] ? `<img src="${esc(customIcons[app.id])}" alt="">` : app.glyph
 }</span>
       <span class="app-label">${esc(app.label)}</span>
     </button>`;

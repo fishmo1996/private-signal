@@ -8,13 +8,10 @@
 
 import { getState, getCharacter } from './state.js';
 import { personaForRoom } from './persona.js';
+import { esc as escB } from '../utils/esc.js';
 
 /** esc() 等價轉義：書檔同為 innerHTML 語意,XSS 防線不可繞過。 */
-function escB(str) {
-  return String(str ?? '')
-    .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;').replaceAll("'", '&#39;');
-}
+// escB=utils/esc.js 的 esc(v91 收斂;書檔同為 innerHTML 語意,防線不可繞過)
 
 function paragraphsOf(messages, playerName) {
   return messages

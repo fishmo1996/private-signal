@@ -18,6 +18,7 @@ import {
   getState, genId, persist, getCharacter, getRoomMessages,
 } from './state.js';
 import { createCharacter, createGroup, createStory } from './rooms.js';
+import { safeImage } from '../utils/esc.js';
 
 /** 角色的可攜快照(僅公開欄位；無 id、無人設綁定)。 */
 function charSnapshot(c) {
@@ -169,8 +170,9 @@ export async function importRoom(parsed) {
       : m.senderName === 'system' ? 'system'
         : (nameToId.get(m.senderName) || 'system'),
     content: m.content || '',
-    ...(m.image ? { image: m.image } : {}),
-    ...(m.sharedPost ? { sharedPost: m.sharedPost } : {}),
+    // v91:外部檔案的圖片欄一律 safeImage 守門(屬性逃逸原料擋在門外;渲染端 esc 是第二層)
+    ...(safeImage(m.image) ? { image: safeImage(m.image) } : {}),
+    ...(m.sharedPost ? { sharedPost: cleanSharedPost(m.sharedPost) } : {}),
     ...(Array.isArray(m.choices) && m.choices.length ? { choices: m.choices } : {}),
     ...(m.editedAt ? { editedAt: m.editedAt } : {}),
     createdAt: m.createdAt || Date.now(),
@@ -206,4 +208,14 @@ export async function importRoom(parsed) {
 
   await persist();
   return { room, createdCharacters };
+}
+
+
+/** v91:匯入的分享卡淨化——image 過 safeImage,其餘欄位照舊(內容欄由渲染端 esc 把關)。 */
+function cleanSharedPost(sp) {
+  if (!sp || typeof sp !== 'object') return sp;
+  const out = { ...sp };
+  const img = safeImage(out.image);
+  if (img) out.image = img; else delete out.image;
+  return out;
 }

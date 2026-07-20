@@ -8,6 +8,7 @@
  */
 
 import { getState } from './state.js';
+import { safeImage } from '../utils/esc.js';
 import { createCharacter } from './rooms.js';
 import { createWorldbook, addEntry, updateWorldbook } from './worldbook.js';
 
@@ -39,7 +40,7 @@ export function exportCharacterPack(character) {
       alternateGreetings: character.alternateGreetings || [],
       relationship: character.relationship || '',
       avatarEmoji: character.avatarEmoji || '',
-      avatarImage: character.avatarImage || null,
+      avatarImage: safeImage(character.avatarImage), // v91 守門
       themeColor: character.themeColor || '#8ea7ff',
       proactivity: character.proactivity || 'mid',
       emojiStyle: character.emojiStyle || '',
@@ -282,7 +283,7 @@ export async function parseCharacterImport(bytes, { pngDataUrl = null } = {}) {
       systemPrompt: c.systemPrompt || '',
       relationship: c.relationship || '',
       avatarEmoji: c.avatarEmoji || '',
-      avatarImage: c.avatarImage || avatarFromPng || null,
+      avatarImage: safeImage(c.avatarImage || avatarFromPng), // v91 守門
       themeColor: c.themeColor || '#8ea7ff',
       proactivity: c.proactivity || 'mid',
       emojiStyle: c.emojiStyle || '',
@@ -322,7 +323,7 @@ export async function parseCharacterImport(bytes, { pngDataUrl = null } = {}) {
     systemPrompt: d.system_prompt || '',
     relationship: ext.relationship || '',
     avatarEmoji: ext.avatarEmoji || '',
-    avatarImage: ext.avatarImage || avatarFromPng || null,
+    avatarImage: safeImage(ext.avatarImage || avatarFromPng), // v91 守門
     themeColor: ext.themeColor || '#8ea7ff',
     proactivity: ext.proactivity || 'mid',
     emojiStyle: ext.emojiStyle || '',

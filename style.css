@@ -2183,3 +2183,35 @@ body.theme-forest .app-glyph.has-img img {
   white-space: nowrap;
   cursor: pointer;
 }
+
+/* ============================================================
+   v94:全站燈箱(t1)+ 貼文圖不裁切 + 青霧圖示轉綠(s1)
+   ============================================================ */
+#lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+#lightbox img {
+  max-width: 96vw;
+  max-height: 94vh;
+  object-fit: contain;
+  border-radius: 6px;
+}
+#lightbox[hidden] { display: none; }
+/* 貼文圖改等比完整顯示(舊 object-fit:cover 會裁掉上下——妳看到的是部分,角色看到的是全圖) */
+.post-image {
+  height: auto;
+  max-height: 480px;
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.04);
+}
+/* s1:青霧主題的自訂圖示同樣轉綠(與森林同角度;混色圖示如齒輪會轉粉,不合意可回報) */
+body.theme-sage .app-glyph.has-img img {
+  filter: hue-rotate(140deg) saturate(0.85);
+}

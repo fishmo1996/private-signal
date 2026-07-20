@@ -2,6 +2,7 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="script-src 'self'; object-src 'none'; base-uri 'self'">
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
@@ -33,37 +34,8 @@
 
   <div id="modalRoot"></div>
 
-  <!-- 載入守門員(非 module,一定會執行):
-       ES Modules 只要有一個檔案載入失敗(例如瀏覽器快取到新舊混雜的版本),
-       整個程式會靜默失敗、畫面全黑。這段程式會攔截錯誤並顯示指引,
-       不會動到任何 IndexedDB 資料。 -->
-  <script>
-    (function () {
-      var bootErrors = [];
-      window.addEventListener('error', function (e) {
-        var msg = e && (e.message || (e.error && e.error.message));
-        if (!msg && e && e.target && e.target.src) msg = '資源載入失敗:' + e.target.src;
-        if (msg) bootErrors.push(String(msg));
-      }, true);
-      window.addEventListener('unhandledrejection', function (e) {
-        if (e && e.reason) bootErrors.push(String(e.reason.message || e.reason));
-      });
-      setTimeout(function () {
-        var screen = document.getElementById('phoneScreen');
-        if (!screen || screen.childElementCount > 0) return; // 已正常渲染
-        var detail = bootErrors.length
-          ? '<p style="font-size:12px;word-break:break-all">' + bootErrors.slice(0, 3).join('<br>')
-              .replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</p>'
-          : '';
-        screen.innerHTML =
-          '<div class="phone-empty"><h2>畫面沒有啟動</h2>' + detail +
-          '<p>最常見原因是瀏覽器快取了新舊混雜的程式檔。' +
-          '請按 <strong>Ctrl+F5</strong>(Mac:Cmd+Shift+R)強制重新整理。</p>' +
-          '<p>你的本機資料存在 IndexedDB(private-signal-db),' +
-          '<strong>沒有被刪除或覆蓋</strong>。</p></div>';
-      }, 2500);
-    })();
-  </script>
+  <!-- 載入守門員(v91 外移至 guard.js 以配合 CSP;功能不變) -->
+  <script src="./guard.js?v=91"></script>
 
   <script type="module" src="./app.js?v=2"></script>
 </body>

@@ -6,6 +6,7 @@
  */
 
 import { getState } from './state.js';
+import { esc } from '../utils/esc.js';
 
 let petTimer = null;
 let bubbleTimer = null;
@@ -54,7 +55,7 @@ function imgFor(pose) {
   const p = petSettings();
   const map = { stand: p.imgStand, walk: p.imgWalk || p.imgStand, sit: p.imgSit || p.imgStand };
   const src = map[pose];
-  return src ? `<img src="${src}" alt="">` : FALLBACK_SVG;
+  return src ? `<img src="${esc(src)}" alt="">` : FALLBACK_SVG;
 }
 
 function speak() {
