@@ -238,25 +238,64 @@ export function parseWorldbookImport(jsonText) {
     }];
   }
 
-  // ST/Risu 格式:{ entries: {0:{...},1:{...}} } 或 { entries: [...] }
-  const rawEntries = parsed.entries
-    ? (Array.isArray(parsed.entries) ? parsed.entries : Object.values(parsed.entries))
-    : null;
-  if (rawEntries && rawEntries.length) {
-    return [{
-      name: parsed.name || '匯入的世界書',
-      enabled: true,
-      entries: rawEntries.map(normalizeImportEntry).filter((e) => e.content),
-    }];
+  // ST/Risu 傳統格式:{ entries: {0:{...},1:{...}} } 或 { entries: [...] }
+  // v94.3 擴充:Risu 新版把條目包在各種殼裡——逐殼剝(擁有者實案:「之前可以現在不行」
+  // =檔案來源換了新版格式,不是解析器退化,迴圈測試已自證)
+  const candidates = [
+    parsed.entries,
+    parsed.data?.entries,                       // 卡片式包裝
+    parsed.character_book?.entries,             // V2 card book 單獨存檔
+    parsed.data?.character_book?.entries,
+    parsed.lorebook?.entries ?? parsed.lorebook, // Risu lorebook 殼(entries 或直接陣列)
+    parsed.data?.lorebook,                      // Risu 模組匯出
+    Array.isArray(parsed.data) ? parsed.data : null, // data 直接是條目陣列
+  ];
+  for (const cand of candidates) {
+    if (!cand) continue;
+    const arr = Array.isArray(cand) ? cand : Object.values(cand);
+    if (arr.length && arr.some((e) => e && typeof e === 'object')) {
+      const entries = arr.map(normalizeImportEntry).filter((e) => e.content);
+      if (entries.length) {
+        return [{ name: parsed.name || parsed.data?.name || '匯入的世界書', enabled: true, entries }];
+      }
+    }
   }
 
-  throw new Error('無法辨識的世界書格式(找不到 entries)');
+  // 深度掃描保底:在物件樹裡(深度≤4)找「長得像條目陣列」的東西——
+  // 過半元素是帶內容欄(content/text/entry)的物件即候選;確認視窗會顯示條目數讓玩家把關,
+  // 且匯入永不覆蓋既有資料,誤判成本=一本可刪的新書。
+  const found = deepFindEntries(parsed, 0);
+  if (found) {
+    const entries = found.map(normalizeImportEntry).filter((e) => e.content);
+    if (entries.length) return [{ name: '匯入的世界書(自動辨識)', enabled: true, entries }];
+  }
+
+  // v94.3:錯誤訊息自報頂層鍵名——就算失敗,訊息本身就是診斷書,回報即可精準補格式
+  const topKeys = Object.keys(parsed || {}).slice(0, 8).join(', ') || '(空物件)';
+  throw new Error(`無法辨識的世界書格式(頂層鍵:${topKeys})——把這整句回報給開發 AI 即可精準支援`);
+}
+
+/** v94.3:深度掃描——樹裡找過半元素帶內容欄的物件陣列。 */
+function deepFindEntries(node, depth) {
+  if (depth > 4 || !node || typeof node !== 'object') return null;
+  if (Array.isArray(node)) {
+    const objs = node.filter((e) => e && typeof e === 'object');
+    if (objs.length >= Math.max(1, node.length / 2)
+      && objs.some((e) => typeof (e.content ?? e.text ?? e.entry) === 'string')) return node;
+    return null;
+  }
+  for (const v of Object.values(node)) {
+    const hit = deepFindEntries(v, depth + 1);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 function normalizeImportEntry(e, i) {
-  const keys = Array.isArray(e.keywords) ? e.keywords
-    : Array.isArray(e.keys) ? e.keys
-      : Array.isArray(e.key) ? e.key : [];
+  // v94.3:key 欄補「字串型」(Risu 常以逗號分隔字串存 key),content 補 text/entry 變體
+  const rawKeys = e.keywords ?? e.keys ?? e.key ?? [];
+  const keys = Array.isArray(rawKeys) ? rawKeys
+    : typeof rawKeys === 'string' ? rawKeys.split(/[,,]/) : [];
   const order = [e.priority, e.insertion_order, e.order]
     .find((v) => Number.isFinite(Number(v)));
   const secKeys = Array.isArray(e.secondaryKeywords) ? e.secondaryKeywords
@@ -266,7 +305,7 @@ function normalizeImportEntry(e, i) {
     title: e.title || e.comment || e.name || `條目 ${i + 1}`,
     keywords: keys.map((k) => String(k).trim()).filter(Boolean),
     secondaryKeywords: secKeys.map((k) => String(k).trim()).filter(Boolean),
-    content: String(e.content || '').trim(),
+    content: String(e.content ?? e.text ?? e.entry ?? '').trim(),
     alwaysOn: !!(e.alwaysOn ?? e.constant),
     priority: order !== undefined ? Number(order) : 100,
     enabled: e.enabled !== false && e.disable !== true,

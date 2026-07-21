@@ -90,11 +90,13 @@ export function auditCharacterCard(card) {
 
 
 /** v87(p3):偷看快照結果紀錄(每型滾動 30 筆)。outcome: 'ok'|'gate'(閘門攔下)|'block'(安全攔截)|'err'。 */
-export function recordPeek(state, peekType, outcome) {
+export function recordPeek(state, peekType, outcome, message = '') {
   if (!state.peekStats) state.peekStats = {};
   if (!Array.isArray(state.peekStats[peekType])) state.peekStats[peekType] = [];
   const arr = state.peekStats[peekType];
-  arr.push({ t: Date.now(), o: outcome });
+  // v94.1(u4):失敗病歷——各失敗型只留「最後一句錯誤原文」(截 120 字),
+  // 讓「其他失敗」不再是黑箱(擁有者實案:22 次 11 次 err 無從屍檢)。
+  arr.push({ t: Date.now(), o: outcome, ...(outcome !== 'ok' && message ? { m: String(message).slice(0, 120) } : {}) });
   if (arr.length > 30) arr.splice(0, arr.length - 30);
 }
 
@@ -102,6 +104,10 @@ export function recordPeek(state, peekType, outcome) {
 export function peekSummary(state) {
   return Object.entries(state.peekStats || {}).map(([peekType, arr]) => {
     const c = (o) => arr.filter((r) => r.o === o).length;
-    return { peekType, n: arr.length, ok: c('ok'), gate: c('gate'), block: c('block'), err: c('err') };
+    const lastErrOf = (o) => [...arr].reverse().find((r) => r.o === o && r.m)?.m || '';
+    return {
+      peekType, n: arr.length, ok: c('ok'), gate: c('gate'), block: c('block'), err: c('err'),
+      lastErr: { gate: lastErrOf('gate'), block: lastErrOf('block'), err: lastErrOf('err') }, // v94.1(u4)
+    };
   });
 }

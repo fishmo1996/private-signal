@@ -135,7 +135,7 @@ export async function generatePhonePeek(characterId, peekType) {
       const prompt = buildPhonePeekPrompt({ character, peekType });
       const r = await generateReply(cfg, prompt, { tier: 'secondary' });
       if (!r.ok) {
-        recordPeek(getState(), peekType, r.blocked ? 'block' : 'err'); // v87(p3)
+        recordPeek(getState(), peekType, r.blocked ? 'block' : 'err', r.message); // v87(p3)+v94.1(u4) 病歷
         await persist();
         return { ok: false, message: r.message };
       }
@@ -146,7 +146,7 @@ export async function generatePhonePeek(characterId, peekType) {
       // v77(根源二):安全攔截已在 generateReply 層辨識並帶真實原因回來(上面的 r.message),
       // 走到這裡的空內容=清潔器攔下的格式走鐘,重按確實有效,文案不誤導。
       if (!String(content || '').trim()) {
-        recordPeek(getState(), peekType, 'gate'); // v87(p3):閘門攔下率進統計
+        recordPeek(getState(), peekType, 'gate', '整包不合格式(清潔器攔下)'); // v87(p3)+v94.1(u4)
         await persist();
         return { ok: false, message: '這次生成的內容整包不合格式,已幫你攔下——再按一次「更新快照」通常就正常。' };
       }

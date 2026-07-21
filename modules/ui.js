@@ -3456,7 +3456,13 @@ function peekDashHtml(state) {
   const rows = peekSummary(state);
   if (!rows.length) return '(尚無紀錄——每次真實快照生成都會計入)';
   const name = { draft: '草稿', search: '搜尋', playlist: '播放' };
-  return rows.map((r) => `${name[r.peekType] || r.peekType}:${r.n} 次 · 成功 ${r.ok} · 閘門攔下 ${r.gate} · 安全攔截 ${r.block}${r.err ? ` · 其他失敗 ${r.err}` : ''}`).join('<br>')
+  return rows.map((r) => {
+    const errLines = ['gate', 'block', 'err']
+      .filter((k) => r.lastErr?.[k])
+      .map((k) => `<span class="panel-note">　└ ${({ gate: '閘門', block: '安全', err: '其他' })[k]}最後一次:${esc(r.lastErr[k])}</span>`)
+      .join('<br>');
+    return `${name[r.peekType] || r.peekType}:${r.n} 次 · 成功 ${r.ok} · 閘門攔下 ${r.gate} · 安全攔截 ${r.block}${r.err ? ` · 其他失敗 ${r.err}` : ''}${errLines ? `<br>${errLines}` : ''}`;
+  }).join('<br>')
     + '<br><span class="panel-note">「閘門攔下」高=格式走鐘(v87 的格式優先權補丁就是治它,部署後看有沒有降)。</span>';
 }
 
