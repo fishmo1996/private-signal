@@ -541,6 +541,27 @@ export function parseGroupReplies(text, participants, maxReplies = 3) {
     if (rescued2.length) items = rescued2;
   }
 
+  // v94.5:名字行剖析層——lite 模型在多角色重載下常退化成「名字:內容」純文字
+  // (prompt 的歷史示範本來就長這樣),舊版沒有這層 → 整坨塞給第一人(擁有者五人房實案:
+  // 「全部擠在同一個人回」)。逐行掃:行首≤16字+冒號(五種變體)且模糊命中參與者=新的一則,
+  // 其餘行=接續上一則。
+  if (!items) {
+    const lineItems = [];
+    let cur = null;
+    for (const line of String(text || '').split('\n')) {
+      const m = line.match(/^\s*([^\n::\uFE30\uFE55\u2236]{1,16}?)\s*[::\uFE30\uFE55\u2236]\s*(.*)$/);
+      const who = m ? resolveParticipant(m[1], participants) : null;
+      if (who) {
+        if (cur) lineItems.push(cur);
+        cur = { name: who.name, content: m[2] };
+      } else if (cur && line.trim()) {
+        cur.content += `\n${line.trim()}`;
+      }
+    }
+    if (cur) lineItems.push(cur);
+    if (lineItems.length) items = lineItems;
+  }
+
   if (!items) {
     const content = stripNamePrefix(text, names);
     return content && participants[0]
@@ -551,12 +572,31 @@ export function parseGroupReplies(text, participants, maxReplies = 3) {
   const out = [];
   for (const item of items) {
     if (!item || typeof item.content !== 'string' || !item.content.trim()) continue;
-    const name = String(item.name || '').trim();
-    const c = participants.find((p) => p.name === name)
-      || participants.find((p) => name && (p.name.includes(name) || name.includes(p.name)));
+    // v94.5:歸戶改模糊解析(正規化+唯一命中)——舊版裸 includes 認不出帶表符卡名/簡稱,
+    // 認不出=整則靜默丟棄(「訊息被吃掉」實案)
+    const c = resolveParticipant(item.name, participants);
     if (!c) continue;
     out.push({ characterId: c.id, content: stripNamePrefix(item.content, names) });
     if (out.length >= maxReplies) break;
   }
   return out;
+}
+
+/**
+ * v94.5:參與者模糊解析——正規化(去非中英數)後:精確相等優先;否則互為包含(≥2字)
+ * 且「唯一命中」才算;歧義=null(寧可跳過,不可歸錯戶)。
+ */
+function resolveParticipant(rawName, participants) {
+  const bare = (x) => String(x || '').replace(/[^\p{Script=Han}A-Za-z0-9]/gu, '');
+  const nb = bare(rawName);
+  if (!nb) return null;
+  const exact = participants.find((p) => bare(p.name) === nb);
+  if (exact) return exact;
+  // 包含比對不設長度門檻(單字卡名「甲」要能吃「甲同學」——既有斷言守著),
+  // 安全閥=唯一命中:兩人以上都像就放棄,寧可跳過不歸錯戶。
+  const hits = participants.filter((p) => {
+    const pb = bare(p.name);
+    return pb && (pb.includes(nb) || nb.includes(pb));
+  });
+  return hits.length === 1 ? hits[0] : null;
 }

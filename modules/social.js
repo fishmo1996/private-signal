@@ -551,7 +551,16 @@ export function buildSoloSocialReplyPrompt({ post, character, triggerText, reply
 export function buildAutoPostPrompt(character, rng = Math.random) {
   const state = getState();
   const shared = sharedMemoriesFor(character.knownPersonaId || state.defaultPersonaId).map((m) => `- ${m.content}`).join('\n') || '(無)';
-  const recentPosts = getPosts().slice(0, 5)
+  // v94.4:近況貼文補圈子過濾——舊版 getPosts().slice(0,5) 拿全站最新五篇,
+  // A 世界的貼文原文餵進 B 世界角色的發文素材(還混進世界書觸發文字,雙重污染;
+  // 擁有者實案:「不同世界觀的發文感覺互相污染」)。過濾語意與 recentFeedText 完全一致:
+  // 貼文圈=personaId>作者的 knownPersonaId;無圈(null)=全圈可見。
+  const myCircle = character.knownPersonaId || state.defaultPersonaId;
+  const circleOfP = (p) => p.personaId
+    || (p.authorId !== 'player' ? (getCharacter(p.authorId)?.knownPersonaId || state.defaultPersonaId) : null);
+  const recentPosts = getPosts()
+    .filter((p) => { const cir = circleOfP(p); return !cir || cir === myCircle; })
+    .slice(0, 5)
     .map((p) => `- ${p.authorId === 'player' ? (getPersona(p.personaId)?.name || '玩家') : (getCharacter(p.authorId)?.name || '?')}:${p.content.slice(0, 40)}`)
     .join('\n') || '(無)';
 

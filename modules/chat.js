@@ -400,7 +400,7 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
         notify({ typingBy: (mentioned || participants[0])?.name || '' });
         const r = await generateReply(cfgG, buildGroupPrompt({ roomId, mentionName: mentioned?.name || null }));
         if (r.ok) {
-          const pack = parseGroupReplies(r.text, participants);
+          const pack = parseGroupReplies(r.text, participants, Math.max(3, participants.length)); // v94.5:上限隨人數——舊預設3,四角色房永遠有一人被剪(「輸入中又不見」實案)
           if (!pack.length) {
             appendMessage(roomId, { role: 'system', senderId: 'system', content: 'AI 回覆了無法解析的內容，請再試一次。你的訊息已保留。' });
             await persist(); notify({});

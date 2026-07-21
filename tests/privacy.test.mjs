@@ -129,4 +129,12 @@ const gCircle = (await import('../modules/persona.js')).personaForRoom(g)?.id;
 t(smf85(gCircle).some((m) => m.content.includes('M85')), 'k2:群事件寫入本圈看得到');
 t(!smf85('psn_other_circle').some((m) => m.content.includes('M85')), 'k2:群事件寫入不再是全域(他圈看不到)');
 
+
+// --- v94.4:發文近況的圈子過濾(全站最後一條無過濾的社群素材管線) ---
+const { createPost: cp944 } = await import('../modules/social.js');
+await cp944('player', '本圈近況N44');
+const otherP944 = await cp944('player', '他圈祕密N44X', null, 'psn_other_circle');
+const ap944 = flat(bap83(A));
+t(ap944.includes('N44') && !ap944.includes('N44X'), '發文近況:本圈貼文進、他圈貼文絕不進(圈子過濾)');
+
 summary('隱私鐵律');

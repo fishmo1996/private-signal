@@ -74,4 +74,19 @@ globalThis.fetch = async () => ({ ok: true, json: async () => ({ candidates: [{ 
 const rMax = await generateReply({ provider: 'gemini', apiKey: 'k', model: 'gemini-test', thinkingBudget: '', presets: [] }, { system: 's', messages: [], meta: {} });
 t(!rMax.ok && /思考/.test(rMax.message) && !/審查/.test(rMax.message.slice(0, 10)), 'v84.2 MAX_TOKENS 講真話,不誤導成審查');
 
+// --- v94.5:五人房歸戶三案(名字行剖析/模糊歸戶/上限隨人數) ---
+const P5 = [{ id: 'c1', name: '甲' }, { id: 'c2', name: '乙木' }, { id: 'c3', name: '丙火🔥' }, { id: 'c4', name: '丁' }];
+const plain = '甲:大家晚安\n乙木:晚安啊\n丙火:今天練團累死\n丁:+1';
+const r945a = parseGroupReplies(plain, P5, 4);
+t(r945a.length === 4 && new Set(r945a.map((x) => x.characterId)).size === 4, 'v94.5 名字行格式:四人各歸各戶(不再整坨塞第一人)');
+t(r945a[2].characterId === 'c3', 'v94.5 模糊歸戶:卡名帶表符、輸出無表符也認得');
+const r945b = parseGroupReplies(plain, P5); // 預設上限 3
+t(r945b.length === 3, 'v94.5 預設上限語意不變(呼叫端才放大)');
+const multi = '甲:第一句\n繼續第二行\n丁:換我';
+const r945c = parseGroupReplies(multi, P5, 4);
+t(r945c.length === 2 && r945c[0].content.includes('第二行'), 'v94.5 接續行併入上一則');
+const stranger = '[{"name":"路人","content":"亂入"},{"name":"甲","content":"正常"}]';
+const r945d = parseGroupReplies(stranger, P5, 4);
+t(r945d.length === 1 && r945d[0].characterId === 'c1', 'v94.5 陌生名跳過不誤塞,合法則保留');
+
 summary('JSON 救援');
