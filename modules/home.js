@@ -30,6 +30,7 @@ export const HOME_APPS = [
   { id: 'album',    label: '相簿',   view: 'album',      glyph: '✧', tone: 'b' },
   { id: 'player',   label: '玩家',   view: 'player',     glyph: '✿', tone: 'g' },
   { id: 'worldbook', label: '世界書', view: 'worldbook',  glyph: '▤', tone: 'f' },
+  { id: 'memory',   label: '記憶',   view: 'memory-hub', glyph: '✦', tone: 'a' }, // v99.2:記憶總管 App 頁
   { id: 'charphone', label: '角色手機', view: 'char-phone', glyph: '▣', tone: 'd' },
 ];
 

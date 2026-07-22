@@ -308,6 +308,7 @@ function renderPhone() {
     case 'char-phone': renderCharPhoneList(); break;
     case 'char-phone-detail': renderCharPhoneDetail(); break;
     case 'settings': renderSettings(); break;
+    case 'memory-hub': renderMemoryHub(); break; // v99.2:記憶 App 頁
     case 'worldbook': renderWorldbookList(); break;
     case 'worldbook-detail': renderWorldbookDetail(); break;
     default: renderHome();
@@ -3260,7 +3261,8 @@ function memoryItemHtml(m) {
     </div>`;
 }
 
-function renderMemoryPanel() {
+/** v99.2:記憶總管內容——手機「記憶」App 頁與桌面側板共用(抽自原 renderMemoryPanel,逐位元等價)。 */
+function memoryHubHtml() {
   const state = getState();
   const mem = state.memories;
 
@@ -3324,24 +3326,35 @@ function renderMemoryPanel() {
         <button class="remember-btn danger" data-inbox-reject="${esc(it.id)}">駁回</button>
       </div>`).join('')}` : '';
 
-  els.panelBody.innerHTML = `
+  return `
     <div class="panel-note">這裡是「總倉庫」：不管你現在開著哪個 App,它都列出全站所有記憶(依歸屬分組)。各對話自己的記憶，主要入口是該對話標題列的「記憶」抽屜。</div>
     <div class="panel-note">在聊天訊息或社群貼文上按「記住」，就能把它變成一條可編輯的記憶。DM 的記憶只有該角色本人看得到。</div>
     ${inboxHtml}
     ${knowledgeMatrix}
-    <div class="mem-heading">共享記憶(所有角色可見，含社群)</div>
-    ${mem.shared.length
-    ? `<details class="mem-group" data-mem-group="shared">
-         <summary class="mem-subheading">全部共享記憶(${mem.shared.length})</summary>
-         ${mem.shared.map(memoryItemHtml).join('')}
-       </details>`
-    : '<div class="panel-empty small">尚無共享記憶</div>'}
+    <div class="mem-heading">共享記憶(依圈子隔離;全域=所有圈可見)</div>
+    ${(() => { // v99.1:共享記憶依圈子分組——資料層 v62 起就有 circleId,顯示層一直混在一格(擁有者指正)
+    if (!mem.shared.length) return '<div class="panel-empty small">尚無共享記憶</div>';
+    const byCir = {};
+    for (const m of mem.shared) (byCir[m.circleId || ''] = byCir[m.circleId || ''] || []).push(m);
+    const cirName = (cid) => (cid ? `「${esc(getPersona(cid)?.name || '(已刪除的人設)')}」圈` : '全域(所有圈可見)');
+    return Object.entries(byCir)
+      .sort(([a2], [b2]) => (a2 === '' ? -1 : b2 === '' ? 1 : 0)) // 全域排最前,其餘依出現序
+      .map(([cid, list]) => `
+        <details class="mem-group" data-mem-group="shared:${esc(cid || 'global')}">
+          <summary class="mem-subheading">共享·${cirName(cid)}(${list.length})</summary>
+          ${list.map(memoryItemHtml).join('')}
+        </details>`).join('');
+  })()}
     <div class="mem-heading">角色私密記憶(僅本人可見)</div>
     ${privateSections || '<div class="panel-empty small">尚無私密記憶</div>'}
     <div class="mem-heading">場景記憶(僅在場角色可見)</div>
     ${roomSections || '<div class="panel-empty small">尚無場景記憶</div>'}`;
+}
 
-  els.panelBody.querySelectorAll('.mem-group').forEach((d) => {
+/** 共用綁定:root=容器;rerender=動作後重畫(側板/手機頁各傳自己)。 */
+function bindMemoryHub(root, rerender) {
+
+  root.querySelectorAll('.mem-group').forEach((d) => {
     if (openMemGroups.has(d.dataset.memGroup)) d.open = true;
     if (editingMemoryId && d.querySelector(`.memory-item[data-mem="${editingMemoryId}"]`)) d.open = true;
     d.addEventListener('toggle', () => {
@@ -3349,40 +3362,53 @@ function renderMemoryPanel() {
       else openMemGroups.delete(d.dataset.memGroup);
     });
   });
-  els.panelBody.querySelectorAll('[data-inbox-adopt]').forEach((b) => b.addEventListener('click', async () => { // v99(y3)
+  root.querySelectorAll('[data-inbox-adopt]').forEach((b) => b.addEventListener('click', async () => { // v99(y3)
     await adoptInboxItem(b.dataset.inboxAdopt);
-    renderMemoryPanel();
+    rerender();
   }));
-  els.panelBody.querySelectorAll('[data-inbox-reject]').forEach((b) => b.addEventListener('click', async () => {
+  root.querySelectorAll('[data-inbox-reject]').forEach((b) => b.addEventListener('click', async () => {
     await rejectInboxItem(b.dataset.inboxReject);
-    renderMemoryPanel();
+    rerender();
   }));
-  els.panelBody.querySelectorAll('[data-mem-edit]').forEach((b) => b.addEventListener('click', () => {
+  root.querySelectorAll('[data-mem-edit]').forEach((b) => b.addEventListener('click', () => {
     editingMemoryId = b.dataset.memEdit;
-    renderMemoryPanel();
+    rerender();
   }));
-  els.panelBody.querySelectorAll('[data-mem-cancel]').forEach((b) => b.addEventListener('click', () => {
+  root.querySelectorAll('[data-mem-cancel]').forEach((b) => b.addEventListener('click', () => {
     editingMemoryId = null;
-    renderMemoryPanel();
+    rerender();
   }));
-  els.panelBody.querySelectorAll('[data-mem-save]').forEach((b) => b.addEventListener('click', async () => {
-    const item = els.panelBody.querySelector(`.memory-item[data-mem="${b.dataset.memSave}"]`);
+  root.querySelectorAll('[data-mem-save]').forEach((b) => b.addEventListener('click', async () => {
+    const item = root.querySelector(`.memory-item[data-mem="${b.dataset.memSave}"]`);
     const box = item.querySelector('.mem-edit');
     await editMemory(b.dataset.memSave, box.value, {
       eventDate: item.querySelector('.mem-event-date')?.value ?? undefined,
       annualDate: item.querySelector('.mem-annual-date')?.value ?? undefined,
     });
     editingMemoryId = null;
-    renderMemoryPanel();
+    rerender();
   }));
-  els.panelBody.querySelectorAll('[data-mem-pin]').forEach((b) => b.addEventListener('click', async () => {
+  root.querySelectorAll('[data-mem-pin]').forEach((b) => b.addEventListener('click', async () => {
     await togglePin(b.dataset.memPin);
-    renderMemoryPanel();
+    rerender();
   }));
-  els.panelBody.querySelectorAll('[data-mem-del]').forEach((b) => b.addEventListener('click', async () => {
+  root.querySelectorAll('[data-mem-del]').forEach((b) => b.addEventListener('click', async () => {
     await deleteMemory(b.dataset.memDel);
-    renderMemoryPanel();
+    rerender();
   }));
+}
+
+function renderMemoryPanel() {
+  els.panelBody.innerHTML = memoryHubHtml();
+  bindMemoryHub(els.panelBody, renderMemoryPanel);
+}
+
+/** v99.2:手機本體的「記憶」App 頁(主畫面圖示進入)——同一份總倉庫,行動裝置不再擠側板。 */
+function renderMemoryHub() {
+  els.phoneScreen.innerHTML = `
+    ${appHeader('記憶')}
+    <div class="phone-list" id="memHubBody">${memoryHubHtml()}</div>`;
+  bindMemoryHub(els.phoneScreen.querySelector('#memHubBody'), renderMemoryHub);
 }
 
 /** 開發資訊：資料概況與目前對話的 buildPrompt 預覽(未來 API 會收到什麼)。 */

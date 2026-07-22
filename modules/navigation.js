@@ -91,6 +91,7 @@ export function parentView() {
     case 'album':
     case 'settings':
     case 'worldbook':
+    case 'memory-hub': // v99.2:記憶 App 頁
       return 'home';
     default:
       return 'home';
