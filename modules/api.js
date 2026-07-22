@@ -154,6 +154,18 @@ function parseDataUrl(dataUrl) {
   return m ? { mimeType: m[1], data: m[2] } : null;
 }
 
+/**
+ * c1(⑤):送出前的請求總量保險絲。120,000 字≈18 萬 token,貼近 Gemini 20 萬 token
+ * 長上下文加價線;現行預算(預設 2 萬字)距此有 6 倍餘裕,正常永不觸發,
+ * 純防未來改壞(20 萬 token 悲劇的二次保險)。估法照規格:system+contents 字數
+ * (含 speaker 前綴,因為它會實際進請求;圖片以 base64 另計太重、不在字數規格內)。
+ */
+export const REQUEST_CHAR_FUSE = 120000;
+export function estimateRequestChars({ system, messages }) {
+  return String(system || '').length
+    + (messages || []).reduce((s, m) => s + (m.content?.length || 0) + (m.speaker?.length || 0), 0);
+}
+
 /** 依供應商組出聊天請求(純函式，便於測試)。 */
 export function buildChatRequest(cfg, { system, messages, meta }) {
   const base = cfg.provider === 'custom'
@@ -281,8 +293,13 @@ export function extractReplyText(provider, data) {
  * 失敗時誠實回報(429=額度限制、401/403=金鑰問題),不丟例外。
  */
 export async function generateReply(cfg, prompt, opts = {}) {
-  // tier: 'secondary' 且有設定次要模型時，換模型不換供應商/金鑰(F 案：摘要等雜務走便宜模型)
-  if (opts.tier === 'secondary' && cfg.secondaryModel?.trim()) {
+  // v97(w3):每房模型覆寫——解析順序:房間覆寫 > tier 次要 > 主模型。
+  // 只有「主線生成」的呼叫點會帶 opts.modelOverride(DM 回覆/主動訊息/群包/群自聊/群solo/正文);
+  // 心聲/偷看/日記/社群/摘要等雜務呼叫點一律不帶=不受覆寫影響,正文切 Pro 不會連雜務一起變貴。
+  if (opts.modelOverride?.trim()) {
+    cfg = { ...cfg, model: opts.modelOverride.trim() };
+  } else if (opts.tier === 'secondary' && cfg.secondaryModel?.trim()) {
+    // tier: 'secondary' 且有設定次要模型時，換模型不換供應商/金鑰(F 案：摘要等雜務走便宜模型)
     cfg = { ...cfg, model: cfg.secondaryModel.trim() };
   }
   const model = normalizeModel(cfg.provider, cfg.model);
@@ -292,6 +309,10 @@ export async function generateReply(cfg, prompt, opts = {}) {
       ok: false,
       message: `「${cfg.model}」看起來是顯示名稱，不是 API 模型 id。請到設定按「↻ 取得最新模型」，從下拉選單挑選(正確格式像 gemini-flash-lite-latest)`,
     };
+  }
+  // c1(⑤):總量保險絲——超限直接擋下不送、不重試(重按不會變小,文案不引導無效重按)
+  if (estimateRequestChars(prompt) > REQUEST_CHAR_FUSE) {
+    return { ok: false, message: '單次請求過大:請調低上下文預算或封存章節' };
   }
   // 暫時性錯誤(429 速率限制、5xx、網路抖動)自動退避重試 2 次；金鑰類錯誤不重試。
   const RETRYABLE = new Set([429, 500, 502, 503, 529]);
@@ -356,15 +377,25 @@ export async function generateReply(cfg, prompt, opts = {}) {
  */
 function recordUsage(provider, data, meta) {
   try {
+    // c1(修訂二):補記快取命中 token(c)——快取分層的帳單效果要有數字可驗,
+    // 不能只憑感覺。Gemini=cachedContentTokenCount(隱式快取命中,計入 p 內、按折扣價),
+    // Anthropic=cache_read_input_tokens,OpenAI=prompt_tokens_details.cached_tokens。
     const u = provider === 'gemini'
       ? {
         p: data?.usageMetadata?.promptTokenCount || 0,
         o: data?.usageMetadata?.candidatesTokenCount || 0,
         th: data?.usageMetadata?.thoughtsTokenCount || 0,
+        c: data?.usageMetadata?.cachedContentTokenCount || 0,
       }
       : provider === 'anthropic'
-        ? { p: data?.usage?.input_tokens || 0, o: data?.usage?.output_tokens || 0, th: 0 }
-        : { p: data?.usage?.prompt_tokens || 0, o: data?.usage?.completion_tokens || 0, th: 0 };
+        ? {
+          p: data?.usage?.input_tokens || 0, o: data?.usage?.output_tokens || 0, th: 0,
+          c: data?.usage?.cache_read_input_tokens || 0,
+        }
+        : {
+          p: data?.usage?.prompt_tokens || 0, o: data?.usage?.completion_tokens || 0, th: 0,
+          c: data?.usage?.prompt_tokens_details?.cached_tokens || 0,
+        };
     if (!u.p && !u.o) return;
     const st = getState();
     if (!Array.isArray(st.usageLog)) st.usageLog = [];

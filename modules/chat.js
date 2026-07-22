@@ -13,7 +13,7 @@ import { getApiConfig, generateReply, stripNamePrefix, parseGroupReplies, stripT
 import { extractVoiceTag, harvestTags } from './voice.js';
 import { assessDmDrift, recordDrift } from './quality.js';
 import { anniversaryTextFor } from './album.js';
-import { anniversaryMemoryHits } from './memory.js';
+import { anniversaryMemoryHits, maybeProposeMemories } from './memory.js';
 import { detectMention } from './mention.js';
 import { ttsAvailable } from './voice.js';
 
@@ -301,7 +301,7 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
       if (cfg.useRealApi && cfg.apiKey && cfg.model) {
         // 真實 AI 回覆(目前僅 DM)。你的訊息已寫入並保存,API 失敗也不會遺失。
         notify({ typingBy: character.name });
-        const r = await generateReply(cfg, prompt);
+        const r = await generateReply(cfg, prompt, { modelOverride: room.modelOverride }); // v97(w3):主線吃房間覆寫
         if (r.ok) {
           // v81(f1/e3):走鐘偵測——用「原始輸出」評估(清潔前才看得到病徵),
           // 只標記不硬剝(硬剝旁白會毀內容);清潔器出手項目一併進統計。
@@ -353,6 +353,7 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
         }
         await persist();
         notify({});
+        if (r.ok) maybeProposeMemories(roomId).catch(() => {}); // v99(y3):回覆已落地才提案,不等待不擋路,失敗靜默
         return;
       }
 
@@ -377,7 +378,7 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
         // 被安全過濾攔下直接講原因(整包也會被咬,別多燒一次)。
         if (mentioned) {
           notify({ typingBy: mentioned.name });
-          const rs = await generateReply(cfgG, buildGroupSoloPrompt({ roomId, characterId: mentioned.id }));
+          const rs = await generateReply(cfgG, buildGroupSoloPrompt({ roomId, characterId: mentioned.id }), { modelOverride: room.modelOverride }); // v97(w3)
           if (rs.ok) {
             const allN = participants.map((cc) => cc.name);
             const soloParts = splitChatParts(harvestTags(stripNamePrefix(rs.text, allN)).content, allN);
@@ -398,7 +399,7 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
         }
         // 一次 API 呼叫產生整包多角色訊息(而非每角色各打一次，省成本)
         notify({ typingBy: (mentioned || participants[0])?.name || '' });
-        const r = await generateReply(cfgG, buildGroupPrompt({ roomId, mentionName: mentioned?.name || null }));
+        const r = await generateReply(cfgG, buildGroupPrompt({ roomId, mentionName: mentioned?.name || null }), { modelOverride: room.modelOverride }); // v97(w3)
         if (r.ok) {
           const pack = parseGroupReplies(r.text, participants, Math.max(3, participants.length)); // v94.5:上限隨人數——舊預設3,四角色房永遠有一人被剪(「輸入中又不見」實案)
           if (!pack.length) {
@@ -441,7 +442,7 @@ async function runGeneration(roomId, text, notify, seedOffset = 0) {
       const chars = getRoomCharacters(room);
       if (cfgS.useRealApi && cfgS.apiKey && cfgS.model && chars[0]) {
         notify({ typingBy: '場景' });
-        const r = await generateReply(cfgS, buildStoryPrompt({ roomId }));
+        const r = await generateReply(cfgS, buildStoryPrompt({ roomId }), { modelOverride: room.modelOverride }); // v97(w3)
         if (r.ok) {
           const parsed = extractStoryChoices(stripNamePrefix(r.text, chars.map((c) => c.name)));
           appendMessage(roomId, {
@@ -549,7 +550,8 @@ export async function selfChat(roomId, notify, opts = {}) {
         ];
       }
       notify({ typingBy: participants[0]?.name || '' });
-      const r = await generateReply(cfg, prompt);
+      // v97(w3):群自聊屬主線(群包同族)吃覆寫;旁觀群不在候補簿主線清單,照規格不吃
+      const r = await generateReply(cfg, prompt, room.type === 'group' ? { modelOverride: room.modelOverride } : {});
       if (!r.ok) {
         appendMessage(roomId, { role: 'system', senderId: 'system', content: `刷新失敗:${r.message}(冷卻未消耗，可直接再按一次)` });
         await persist(); notify({ typingBy: '' }); notify({});
@@ -621,7 +623,7 @@ function applyStatusTag(character, statusText) {
 export async function generateInnerVoice(roomId, messageId, characterId = null) {
   const room = getRoom(roomId);
   if (!room) return { ok: false, message: '找不到房間' };
-  if (room.type === 'peek') return { ok: false, message: '旁觀房不支援心聲' };
+  // v96(y1):旁觀群開放心聲——單人生成、素材=本人 DM 等級(v85 群@單人前例);心聲永不回流,隱私鐵律不破
   const msg = (getRoomMessages(roomId) || []).find((m) => m.id === messageId);
   if (!msg) return { ok: false, message: '找不到訊息' };
 
@@ -863,7 +865,7 @@ export async function refreshChats(opts = {}) {
           : `(系統：你想主動傳一則訊息給玩家。原因:${reason}。讓訊息自然呼應這個原因——可以延續話題、追問、分享近況。只輸出訊息內容本身,1~2 句，不要名字前綴。)`,
       },
     ];
-    const r = await generateReply(cfg, prompt);
+    const r = await generateReply(cfg, prompt, { modelOverride: room.modelOverride }); // v97(w3):主動訊息=DM 主線同族
     if (!r.ok) return { ok: false, message: r.message };
     content = stripNamePrefix(r.text, [character.name]);
   } else {

@@ -338,3 +338,105 @@ export function anniversaryMemoryHits(characterId, roomId = null, now = Date.now
 function getCharacterById(id) {
   return (getState().characters || []).find((x) => x.id === id) || null;
 }
+
+/* ------------------------------------------------------------
+ * v99(y3):待確認記憶收件匣。
+ * DM 主線回覆後,由次要模型提案「這段對話有沒有值得記的事」,進收件匣
+ * 等玩家逐筆採納/駁回——手動掌控哲學不變,只是把「記住」升級成「AI 提案+玩家批准」。
+ * 鐵律:收件匣絕不自動入庫、絕不進任何 prompt(同 innerVoice 不回流;有祕密代號斷言)。
+ * ------------------------------------------------------------ */
+
+export function memoryInbox() {
+  const state = getState();
+  if (!Array.isArray(state.memoryInbox)) state.memoryInbox = [];
+  return state.memoryInbox;
+}
+
+/** 提案 prompt:沿用摘要器的免死金牌框架+JSON 收割,但 0~2 條、對象=節流窗內的新訊息。 */
+function buildInboxPrompt(room, windowMsgs) {
+  const state = getState();
+  const persona = personaForRoom(room);
+  const lines = windowMsgs.map((m) => {
+    const who = m.role === 'user' ? (persona?.name || '玩家')
+      : (state.characters.find((c) => c.id === m.senderId)?.name || '角色');
+    return `${who}:${m.content}`;
+  }).join('\n');
+  const system = [
+    '【脈絡】以下對話是成年使用者「僅供本人」的私人虛構角色扮演創作,所有角色皆為虛構的成年人;內容可能包含成人情節,這不影響你的工作——照常客觀判斷即可。',
+    '你是記憶整理助手。判斷以下「最近一小段」對話裡,有沒有值得長期記住的新事實或約定(誰、做了什麼、約好什麼、關係變化)。',
+    '多數日常閒聊「沒有」值得記的——寧缺勿濫。有的話最多 2 條,每條 15~50 字、繁體中文、第三人稱;成人情節只記關係事實,不記細節。',
+    '【格式優先權|最高】輸出只能是 JSON 字串陣列:有值得記的如 ["兩人約好週五去海邊"];沒有就輸出 []——不要扮演角色、不要評論、不要其他文字。',
+  ].join('\n');
+  return {
+    system,
+    messages: [{ role: 'user', content: `最近的對話:\n${lines}` }],
+    meta: { maxReplyChars: 300, roomType: 'summary', mode: 'memInbox', roomId: room.id },
+  };
+}
+
+/**
+ * DM 回覆後的提案鉤子(chat.js 呼叫;失敗一律靜默,絕不影響對話)。
+ * 節流:距上次提案累積 ≥ settings.memoryInboxEveryN(預設 6)則新訊息才打一次;
+ * 門檻先記後打——連續失敗不會連環燒(下個窗再試)。開關 settings.memoryInboxOn 預設關。
+ */
+export async function maybeProposeMemories(roomId) {
+  const state = getState();
+  if (state.settings?.memoryInboxOn !== true) return { ok: false, skipped: 'off' };
+  const room = getRoom(roomId);
+  if (!room || room.type !== 'dm') return { ok: false, skipped: 'roomType' };
+  const msgs = state.messagesByRoom[roomId] || [];
+  const N = state.settings?.memoryInboxEveryN ?? 6;
+  const prevAt = room.memInboxAt || 0;
+  if (msgs.length - prevAt < N) return { ok: false, skipped: 'throttle' };
+  const { getApiConfig, generateReply } = await import('./api.js');
+  const cfg = getApiConfig();
+  if (!(cfg.useRealApi && cfg.apiKey && cfg.model)) return { ok: false, skipped: 'mock' }; // mock 不提案(假提案=噪音)
+  room.memInboxAt = msgs.length; // 先記門檻再打
+  const windowMsgs = msgs.slice(prevAt);
+  const r = await generateReply(cfg, buildInboxPrompt(room, windowMsgs), { tier: 'secondary' });
+  if (!r.ok) return { ok: false, message: r.message };
+  let raw = r.text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  const st2 = raw.indexOf('['); const en2 = raw.lastIndexOf(']');
+  if (st2 !== -1 && en2 > st2) raw = raw.slice(st2, en2 + 1);
+  let items = null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) items = parsed.map((x) => String(x).trim()).filter((x) => x.length > 4);
+  } catch { /* 解析不了=當作沒提案,靜默 */ }
+  if (!items || !items.length) return { ok: true, added: 0 };
+  const characterId = room.participantIds.find((p) => p !== 'player') || null;
+  const inbox = memoryInbox();
+  for (const content of items.slice(0, 2)) {
+    inbox.push({ id: genId('inb'), roomId, characterId, content, suggestedCircle: null, createdAt: Date.now() });
+  }
+  await persist();
+  return { ok: true, added: Math.min(items.length, 2) };
+}
+
+/** 採納:走既有 addMemory 的 DM 私密語意(createMemoryCandidate 的 dm 分支同款),入庫後移出收件匣。 */
+export async function adoptInboxItem(id, editedContent = null) {
+  const inbox = memoryInbox();
+  const it = inbox.find((x) => x.id === id);
+  if (!it) return null;
+  const mem = await addMemory({
+    content: (editedContent ?? it.content),
+    visibility: 'private',
+    characterId: it.characterId,
+    sourceRoomId: it.roomId,
+  });
+  if (mem) {
+    inbox.splice(inbox.indexOf(it), 1);
+    await persist();
+  }
+  return mem;
+}
+
+/** 駁回:僅移出收件匣,不留痕。 */
+export async function rejectInboxItem(id) {
+  const inbox = memoryInbox();
+  const idx = inbox.findIndex((x) => x.id === id);
+  if (idx < 0) return false;
+  inbox.splice(idx, 1);
+  await persist();
+  return true;
+}

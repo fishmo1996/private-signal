@@ -129,7 +129,18 @@ function migrate(s) {
     if (r.statusBar === undefined) r.statusBar = '';
     if (r.type === 'story' && !Array.isArray(r.archivedChapters)) r.archivedChapters = [];
     if (r.type === 'story' && r.chapterCount === undefined) r.chapterCount = 0;
+    // c1(④):上下文錨定裁切的錨(本單先做 DM)。null=尚未立錨,首次 buildPrompt 會立。
+    // 分岔房不繼承:branchRoom 深拷貝會帶著母房的錨,但訊息複製時全換新 id,
+    // 錨天然失效 → budgetSlice 走「錨失效重立」路徑(tests/cache.test.mjs 有斷言釘著)。
+    if (r.type === 'dm' && r.ctxAnchorMsgId === undefined) r.ctxAnchorMsgId = null;
+    // v97(w3):每房模型覆寫(空字串=跟隨全域)。所有房型補欄;主線生成才吃(chat.js 呼叫點決定)
+    if (r.modelOverride === undefined) r.modelOverride = '';
+    // v99(y3):待確認記憶提案的節流錨(上次提案時的訊息數)
+    if (r.type === 'dm' && r.memInboxAt === undefined) r.memInboxAt = 0;
   }
+  // v99(y3):待確認記憶收件匣(絕不自動入庫、絕不進任何 prompt);開關預設關
+  if (!Array.isArray(s.memoryInbox)) s.memoryInbox = [];
+  if (s.settings.memoryInboxOn === undefined) s.settings.memoryInboxOn = false;
   if (s.settings.storyChoices === undefined) s.settings.storyChoices = true;
   if (s.diaryLastRefresh === undefined) s.diaryLastRefresh = 0;
   if (s.selfChatLastRefresh === undefined) s.selfChatLastRefresh = 0;

@@ -36,6 +36,7 @@ import { sendUserMessage, isRoomBusy, editMessage, deleteMessage, regenerateLast
 import { addRoomMember, removeRoomMember, createPeek, branchRoom } from './rooms.js';
 import {
   createMemoryCandidate, addMemory, editMemory, togglePin, deleteMemory, generateSummaryCandidates, commitSummary, archiveChapter, messagesSinceSummary,
+  adoptInboxItem, rejectInboxItem, // v99(y3)
 } from './memory.js';
 import {
   getPosts, getPost, getComments, createPost, addComment, toggleLike,
@@ -914,7 +915,7 @@ function renderMessages() {
     const rememberBtn = `<button class="remember-btn" data-remember="${esc(m.id)}" aria-label="記住這件事">記住</button>`
       + `<button class="remember-btn" data-msg-edit="${esc(m.id)}" aria-label="編輯訊息">編輯</button>`
       + `<button class="remember-btn" data-msg-branch="${esc(m.id)}" aria-label="從這裡分岔">⑂</button>`
-      + ((((room.type === 'dm' || room.type === 'group' || room.type === 'story') && m.role === 'character') || (room.type === 'story' && m.role === 'narrator'))
+      + ((((room.type === 'dm' || room.type === 'group' || room.type === 'story' || room.type === 'peek') && m.role === 'character') || (room.type === 'story' && m.role === 'narrator'))
         ? `<button class="remember-btn" data-inner-voice="${esc(m.id)}" aria-label="心聲">👁${(m.innerVoice || (m.innerVoices && Object.keys(m.innerVoices).length)) ? '' : '?'}</button>` : '')
       + `<button class="remember-btn danger" data-msg-del="${esc(m.id)}" aria-label="刪除訊息">刪除</button>`;
 
@@ -2823,6 +2824,10 @@ function renderSettings() {
         <span class="setting-label">正文行動選項<br><span class="setting-hint">說書人結尾給 2~3 個 ▷ 選項按鈕，可點可無視</span></span>
         <input type="checkbox" id="chkStoryChoices" ${state.settings.storyChoices !== false ? 'checked' : ''}>
       </label>
+      <label class="setting-row">
+        <span class="setting-label">記憶提案收件匣<br><span class="setting-hint">DM 每聊一小段,AI 用次要模型提案「值得記的事」進收件匣,你逐筆批准才入庫(每輪多一次小額呼叫;預設關)</span></span>
+        <input type="checkbox" id="chkMemInbox" ${state.settings.memoryInboxOn === true ? 'checked' : ''}>
+      </label>
 
       <div class="people-heading">AI 連線(API / LLM)</div>
       <div class="panel-note">金鑰只存在這台電腦的瀏覽器裡。目前對話仍使用本機假回覆；這裡先把連線設定準備好，串接時即可直接使用。</div>
@@ -3081,6 +3086,10 @@ function renderSettings() {
     state.settings.voiceTag = e.target.checked;
     await persist();
   });
+  els.phoneScreen.querySelector('#chkMemInbox').addEventListener('change', async (e) => { // v99(y3)
+    state.settings.memoryInboxOn = e.target.checked;
+    await persist();
+  });
   els.phoneScreen.querySelector('#chkStoryChoices').addEventListener('change', async (e) => {
     state.settings.storyChoices = e.target.checked;
     await persist();
@@ -3277,9 +3286,49 @@ function renderMemoryPanel() {
         </details>`;
     }).join('');
 
+  // v96(y2):認知對照表——回答「每個生成入口理論上看得到什麼」(擁有者:「我都搞混了」)。
+  // 這是靜態規則表:改任何建構器的素材注入時,這張表要跟著改(關鍵負向規則另有
+  // tests/privacy.test.mjs 紅綠燈守著,表寫錯測試不會放行實際洩漏)。
+  // 與候補 x1(「這一發實際讀了哪幾條」動態面板)互補:這裡是規則,x1 是實況。
+  const knowRow = (name, knows, notKnows) => `
+    <details class="mem-group" data-mem-group="know:${esc(name)}">
+      <summary class="mem-subheading">${name}</summary>
+      <div class="panel-note">知道:${knows}</div>
+      <div class="panel-note">不知道:${notKnows}</div>
+    </details>`;
+  const knowledgeMatrix = `
+    <div class="mem-heading">誰知道什麼(生成入口 × 素材對照)</div>
+    <div class="panel-note">原則一句話:私密記憶只在「單人生成」時給本人;群聊整包/正文/偷窺群這種一次生多人發言的,私密一律不進。</div>
+    ${knowRow('DM(含 DM 心聲)', '本人私密記憶(全量)、共享記憶(圈)、本房場景記憶、世界書、本房歷史、相簿、社群動態、跨介面近況、關係欄+階段', '日記、別人的私密與 DM')}
+    ${knowRow('群聊(整包生成)', '共享記憶、本群記憶、世界書、在場者互相的關係、社群動態', '任何人的私密記憶與 DM 內容(絕不,一包生多人)、相簿、日記')}
+    ${knowRow('群聊 @單人', '本人私密記憶(12條)、共享、本群記憶、世界書、他 DM 的關係階段', 'DM 訊息內容、相簿、社群動態、別人的私密')}
+    ${knowRow('群/正文心聲', '本人私密記憶、共享、本房記憶、關係階段', '世界書、DM 內容、相簿、社群、別人的私密')}
+    ${knowRow('偷窺群心聲(v96 起)', '本人私密記憶、共享、他 DM 的關係階段(玩家不在場的框架下誠實內心)', '其他成員的私密與 DM、世界書、相簿')}
+    ${knowRow('正文(說書人)', '共享、本場景記憶、世界書、社群動態(註明與劇情時間無關)、關係階段、狀態欄', '任何人的私密記憶與 DM(絕不,多角色一包)、日記')}
+    ${knowRow('偷窺群(整包生成)', '成員公開資料、彼此關係、各自對玩家的關係階段(藏著不明講)、共享記憶、社群動態加料版(含留言)、你們都在場的群近聊、世界書', '任何人的私密記憶與 DM 內容(絕不)、場景記憶、相簿、日記')}
+    ${knowRow('偷看手機', '本人私密記憶、共享、本人日記(近4篇)、他認識的人(關係欄)、DM 關係階段、DM 尾端歷史(24則)', '世界書、社群動態、別人的一切')}
+    ${knowRow('日記', '本人私密記憶、共享、世界書、DM 脈絡', '場景記憶、相簿、社群、別人的私密')}
+    ${knowRow('社群發文', '本人私密記憶(12條+公開版面含蓄條款)、共享、世界書、最近動態+自己舊文(防重複)', 'DM 內容、場景記憶、別人的私密')}
+    ${knowRow('社群回覆(單人)', '本人私密記憶(12條)、共享、世界書、DM 尾端(6則)、DM 關係階段、該篇樓串', '場景記憶、相簿、別人的私密')}`;
+
+  // v99(y3):待確認記憶收件匣——AI 提案、玩家批准才入庫(採納走既有 DM 私密語意)
+  const inbox = state.memoryInbox || [];
+  const inboxHtml = inbox.length ? `
+    <div class="mem-heading">待確認記憶(${inbox.length} 筆)</div>
+    <div class="panel-note">聊完一段後 AI 覺得值得記的事。採納=存成該角色的私密記憶;駁回=直接丟掉。不採納就永遠不會進任何 prompt。</div>
+    ${inbox.map((it) => `
+      <div class="memory-item" data-inbox="${esc(it.id)}">
+        <div>${esc(it.content)}</div>
+        <div class="panel-note">${esc(getCharacter(it.characterId)?.name || '?')} · 來自「${esc(getRoom(it.roomId)?.title || '?')}」</div>
+        <button class="remember-btn" data-inbox-adopt="${esc(it.id)}">採納</button>
+        <button class="remember-btn danger" data-inbox-reject="${esc(it.id)}">駁回</button>
+      </div>`).join('')}` : '';
+
   els.panelBody.innerHTML = `
     <div class="panel-note">這裡是「總倉庫」：不管你現在開著哪個 App,它都列出全站所有記憶(依歸屬分組)。各對話自己的記憶，主要入口是該對話標題列的「記憶」抽屜。</div>
     <div class="panel-note">在聊天訊息或社群貼文上按「記住」，就能把它變成一條可編輯的記憶。DM 的記憶只有該角色本人看得到。</div>
+    ${inboxHtml}
+    ${knowledgeMatrix}
     <div class="mem-heading">共享記憶(所有角色可見，含社群)</div>
     ${mem.shared.length
     ? `<details class="mem-group" data-mem-group="shared">
@@ -3300,6 +3349,14 @@ function renderMemoryPanel() {
       else openMemGroups.delete(d.dataset.memGroup);
     });
   });
+  els.panelBody.querySelectorAll('[data-inbox-adopt]').forEach((b) => b.addEventListener('click', async () => { // v99(y3)
+    await adoptInboxItem(b.dataset.inboxAdopt);
+    renderMemoryPanel();
+  }));
+  els.panelBody.querySelectorAll('[data-inbox-reject]').forEach((b) => b.addEventListener('click', async () => {
+    await rejectInboxItem(b.dataset.inboxReject);
+    renderMemoryPanel();
+  }));
   els.panelBody.querySelectorAll('[data-mem-edit]').forEach((b) => b.addEventListener('click', () => {
     editingMemoryId = b.dataset.memEdit;
     renderMemoryPanel();
@@ -3362,6 +3419,8 @@ function renderDevPanel() {
       角色 ${state.characters.length} · 聊天室 ${state.rooms.length} · 貼文 ${(state.posts || []).length}<br>
       共享記憶 ${state.memories.shared.length} 條
     </div>
+    <div class="mem-heading">記憶體重表(w2;DM 預算閘門=釘選恆進+其餘 ${getState().settings?.memoryBudget ?? 3000} 字)</div>
+    <div class="dev-stats">${memoryWeightHtml(state)}</div>
     <div class="mem-heading">token 帳單(v81;近 400 次呼叫滾動)</div>
     <div class="dev-stats">${usageDashHtml(state)}</div>
     <div class="mem-heading">走鐘統計(v81;各房近 30 次生成)</div>
@@ -3372,12 +3431,38 @@ function renderDevPanel() {
     ${promptPreview}`;
 }
 
+/** v98(w2):記憶體重表——各角色私密/各圈共享的條數+估字量、胖榜 top5;配記憶管理頁手動瘦身。 */
+function memoryWeightHtml(state) {
+  const chars2 = (list) => list.reduce((s, m) => s + (m.content?.length || 0), 0);
+  const rows = [];
+  const all = [];
+  for (const [cid, list] of Object.entries(state.memories.byCharacterId || {})) {
+    if (!list.length) continue;
+    rows.push(`${esc(getCharacter(cid)?.name || '(已離開)')} 私密:${list.length} 條/約 ${chars2(list)} 字`);
+    for (const m of list) all.push({ m, who: getCharacter(cid)?.name || '?' });
+  }
+  const byCircle = {};
+  for (const m of state.memories.shared || []) {
+    const key = m.circleId || '(全域)';
+    (byCircle[key] = byCircle[key] || []).push(m);
+    all.push({ m, who: '共享' });
+  }
+  for (const [cir, list] of Object.entries(byCircle)) {
+    const name = cir === '(全域)' ? '(全域)' : (getPersona(cir)?.name || cir);
+    rows.push(`共享·${esc(name)} 圈:${list.length} 條/約 ${chars2(list)} 字`);
+  }
+  if (!rows.length) return '(尚無記憶)';
+  const fat = all.sort((a, b) => (b.m.content?.length || 0) - (a.m.content?.length || 0)).slice(0, 5)
+    .map(({ m, who }) => `${esc(who)}:${m.content.length} 字「${esc(String(m.content).slice(0, 20))}…」`);
+  return `${rows.join('<br>')}<br>最胖的五條(瘦身候選,到記憶管理修剪):<br>${fat.join('<br>')}`;
+}
+
 /** v81(f3):token 帳單摘要 HTML。 */
 function usageDashHtml(state) {
   const log = state.usageLog || [];
   if (!log.length) return '(尚無紀錄——下一次真實 API 呼叫開始記帳)';
   const day0 = new Date(); day0.setHours(0, 0, 0, 0);
-  const sum = (arr) => arr.reduce((a, e) => ({ p: a.p + (e.p || 0), o: a.o + (e.o || 0), th: a.th + (e.th || 0), n: a.n + 1 }), { p: 0, o: 0, th: 0, n: 0 });
+  const sum = (arr) => arr.reduce((a, e) => ({ p: a.p + (e.p || 0), o: a.o + (e.o || 0), th: a.th + (e.th || 0), c: a.c + (e.c || 0), n: a.n + 1 }), { p: 0, o: 0, th: 0, c: 0, n: 0 });
   const fmt = (x) => x.toLocaleString();
   const today = sum(log.filter((e) => e.t >= +day0));
   const week = sum(log.filter((e) => e.t >= Date.now() - 7 * 864e5));
@@ -3392,6 +3477,9 @@ function usageDashHtml(state) {
   return `今天:輸入 ${fmt(today.p)} + 輸出 ${fmt(today.o)} + 思考 ${fmt(today.th)}(${today.n} 次)<br>`
     + `近 7 日:輸入 ${fmt(week.p)} + 輸出 ${fmt(week.o)} + 思考 ${fmt(week.th)}(${week.n} 次)<br>`
     + `思考佔比(7日):${thShare}%${thShare > 30 ? ' ← thinkingBudget 是最大省錢旋鈕' : ''}<br>`
+    // v95.1(c1 修訂二收尾):快取命中率=命中 token÷輸入 token(7日)。隱式快取有最低
+    // 長度門檻,短對話 0% 屬正常;結構改壞時這數字會先塌,是快取分層的驗收儀表。
+    + `快取命中率(7日):${week.p ? Math.round((week.c / week.p) * 100) : 0}%(命中 ${fmt(week.c)}/輸入 ${fmt(week.p)})<br>`
     + `最燒的對象:<br>${top}`;
 }
 
@@ -4575,6 +4663,10 @@ export function maybeShowChangelog(changelog = []) {
 /* ── Modal:房間設定(作者備註 / 編輯訊息) ── */
 function openAuthorNoteModal(room) {
   const showStage = room.type === 'dm' || room.type === 'story';
+  // v97(w3):每房模型下拉——主線生成吃覆寫(心聲/偷看/日記等雜務照走原通道);旁觀群不吃故不顯示
+  const showModel = room.type === 'dm' || room.type === 'group' || room.type === 'story';
+  const cfgW3 = getApiConfig();
+  const modelOptions = [...new Set([...(cfgW3.modelList || []), ...(room.modelOverride ? [room.modelOverride] : [])])];
   openModal(`
     <h3>作者備註</h3>
     <p class="panel-note">只作用於「${esc(room.title)}」這個對話，會以最高優先指令注入 prompt 尾端。適合寫節奏、氛圍、尺度等導演指令，例如「維持慢節奏，不要讓劇情自己推進」。留空即停用。</p>
@@ -4586,6 +4678,14 @@ function openAuthorNoteModal(room) {
     <label class="field">關係階段(選填；例：曖昧中、交往三個月、冷戰中——給模型一個「我們現在到哪了」的錨點)
       <input id="relStageBox" maxlength="50" value="${esc(room.relationshipStage || '')}" placeholder="留空=不注入">
     </label>` : ''}
+    ${showModel ? `
+    <label class="field">這個房的模型(只影響主線回覆；心聲、偷看手機、日記等仍走原本的模型設定)
+      <select id="roomModelBox">
+        <option value="">跟隨全域(目前:${esc(cfgW3.model || '未設定')})</option>
+        ${modelOptions.map((m) => `<option value="${esc(m)}" ${m === room.modelOverride ? 'selected' : ''}>${esc(m)}</option>`).join('')}
+      </select>
+    </label>
+    ${modelOptions.length ? '' : '<p class="panel-note">下拉沒有選項?到 設定 → API 按「↻ 取得最新模型」抓一次清單。</p>'}` : ''}
     <div class="form-actions">
       <button class="primary-btn slim" id="authorNoteSave">儲存</button>
     </div>`, {
@@ -4595,6 +4695,8 @@ function openAuthorNoteModal(room) {
         room.authorNote = root.querySelector('#authorNoteBox').value.trim();
         const stageBox = root.querySelector('#relStageBox');
         if (stageBox) room.relationshipStage = stageBox.value.trim();
+        const modelBox = root.querySelector('#roomModelBox'); // v97(w3)
+        if (modelBox) room.modelOverride = modelBox.value.trim();
         await persist();
         closeModal();
         renderPhone();

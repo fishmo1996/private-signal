@@ -137,4 +137,17 @@ const otherP944 = await cp944('player', '他圈祕密N44X', null, 'psn_other_cir
 const ap944 = flat(bap83(A));
 t(ap944.includes('N44') && !ap944.includes('N44X'), '發文近況:本圈貼文進、他圈貼文絕不進(圈子過濾)');
 
+// --- v96(y1):旁觀群心聲——單人生成給本人 DM 等級,別人的私密仍一字不進 ---
+const { buildRoomInnerVoicePrompt: birv96 } = await import('../modules/prompt.js');
+getRoomMessages(pk.id).push({ id: 'pkm-1', role: 'character', senderId: A.id, content: '在群裡嘴硬', createdAt: Date.now() });
+const pv96A = flat(birv96({ character: A, roomId: pk.id, messageId: 'pkm-1' }));
+t(pv96A.includes('K9'), '旁觀心聲(甲):含本人私密記憶(DM 等級正控制)');
+t(pv96A.includes('S79'), '旁觀心聲(甲):含他 DM 主線房的關係階段(正控制)');
+t(!pv96A.includes('H7'), '旁觀心聲(甲):DM 訊息內容不進(等級=記憶+階段,不含私訊史)');
+noLeak(pv96A, '旁觀心聲(甲)', LABELS);
+const pv96B = flat(birv96({ character: B, roomId: pk.id, messageId: 'pkm-1' }));
+t(!pv96B.includes('K9') && !pv96B.includes('H7'), '旁觀心聲(乙):拿不到甲的私密記憶與甲的 DM');
+noLeak(pv96B, '旁觀心聲(乙)', LABELS);
+t(birv96({ character: A, roomId: dmA.id, messageId: 'msg-2' }) === null, '房型閘門:DM 房不走此建構器(既有分流不變)');
+
 summary('隱私鐵律');
