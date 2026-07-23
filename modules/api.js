@@ -355,8 +355,12 @@ export async function generateReply(cfg, prompt, opts = {}) {
       }
       const text = extractReplyText(cfg.provider, data).trim();
       recordUsage(cfg.provider, data, prompt.meta); // v81(f3):token 用量入帳(失敗靜默,不影響回覆)
-      if (!text && cfg.provider === 'gemini' && data?.candidates?.[0]?.finishReason === 'MAX_TOKENS') {
-        return { ok: false, message: '輸出額度被思考(thinking)吃光了,不是內容審查——再按一次通常就好;常發生的話到 API 設定把 thinkingBudget 設 0(關思考)或調低。' };
+      // v100.1:思考吃光額度的辨識改「看證據不看代碼」——擁有者實案:同一病灶有時回
+      // MAX_TOKENS、有時回 STOP(想完額度歸零、一字未寫就「正常」收工),舊判準只認前者。
+      // 證據=回覆空+這一發的思考 token > 0,一律如實報思考吃光。
+      if (!text && cfg.provider === 'gemini'
+        && (data?.candidates?.[0]?.finishReason === 'MAX_TOKENS' || (data?.usageMetadata?.thoughtsTokenCount || 0) > 0)) {
+        return { ok: false, message: `輸出額度被思考(thinking)吃光了(這發思考用了 ${data?.usageMetadata?.thoughtsTokenCount || '?'} tokens),不是內容審查——再按一次通常就好;常發生的話到 API 設定把 thinkingBudget 設 0(關思考)或調低。` };
       }
       if (!text) {
         // v99.4:空回覆不再進「不明原因垃圾桶」——把 finishReason 如實吐出,懸案才有線索
