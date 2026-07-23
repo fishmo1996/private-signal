@@ -267,6 +267,7 @@ export async function archiveChapter(roomId, { title = '' } = {}) {
   room.chapterCount = n;
   state.messagesByRoom[roomId] = [];
   room.summarizedUpTo = 0;
+  room.ctxAnchorMsgId = null; // c1-擴(v100):封存清空訊息,錨同步歸零(不清也會走錨失效自癒,清了更明確)
 
   await persist();
   return { ok: true, n, title: chapterTitle, summaryCount: r.items.length };

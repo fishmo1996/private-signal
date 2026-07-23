@@ -90,7 +90,7 @@ export function budgetSlice(msgs, room = null) {
     }
     return picked;
   };
-  if (!room || room.type !== 'dm') return cut(budget);
+  if (!room || !['dm', 'group', 'story'].includes(room.type)) return cut(budget); // c1-擴(v100):錨定納入群/正文;旁觀與各雜務建構器不帶 room=舊行為
 
   /* c1(④):錨定裁切(本單先做 DM)——「每輪重裁到剛好滿」會讓歷史起點逐輪漂移,
    * 前綴快取吃不滿。改:room.ctxAnchorMsgId 錨住起點;僅當錨起算的成本超過預算
@@ -491,7 +491,8 @@ export function buildGroupPrompt({ roomId, mentionName = null, selfTalk = false 
   const personaG = personaForRoom(room);
 
   const useRealTimeG = !participants.every((c) => c.noPhone);
-  const recentMessages = budgetSlice(getRoomMessages(roomId))
+  const recentMessages = budgetSlice(getRoomMessages(roomId), room) // c1-擴(v100):群聊吃錨定裁切
+
     .slice()
     .map((m) => {
       const base = m.sharedPost
@@ -508,17 +509,22 @@ export function buildGroupPrompt({ roomId, mentionName = null, selfTalk = false 
   const lastTsG = getRoomMessages(roomId).slice(-1)[0]?.createdAt || null;
 
   const recentText = recentMessages.map((m) => m.content).join('\n');
-  // 世界書：對任一參與者生效的條目取聯集(去重)
-  const seen = new Set();
-  const lore = [];
-  for (const c of participants) {
-    for (const e of matchEntries({ characterId: c.id, roomId, recentText, presentNames: participants.map((pp) => pp.name) })) {
-      if (!seen.has(e.id)) { seen.add(e.id); lore.push(e); }
+  // 世界書:c1-擴(v100)拆兩層(同 DM):常駐=recentText 空字串取聯集,穩定留 system;
+  // 觸發式=完整 recentText 取聯集後濾掉常駐,搬動態尾巴(maxChars 常駐優先語意保持)。
+  const unionLore = (rt) => {
+    const seen = new Set(); const acc = [];
+    for (const c of participants) {
+      for (const e of matchEntries({ characterId: c.id, roomId, recentText: rt, presentNames: participants.map((pp) => pp.name) })) {
+        if (!seen.has(e.id)) { seen.add(e.id); acc.push(e); }
+      }
     }
-  }
-  const loreText = lore.length
-    ? lore.map((e) => `- (${e.bookName}/${e.title}) ${e.content}`).join('\n')
-    : '(無被觸發的條目)';
+    return acc;
+  };
+  const loreConst = unionLore('');
+  const loreTrig = unionLore(recentText).filter((e) => !e.alwaysOn);
+  const loreConstText = loreConst.length
+    ? loreConst.map((e) => `- (${e.bookName}/${e.title}) ${e.content}`).join('\n')
+    : '(無常駐條目)';
 
   const sharedMemories = sortMemories(sharedMemoriesFor(personaG?.id || state.defaultPersonaId));
   const roomMemories = sortMemories(state.memories.byRoomId[roomId] || []);
@@ -540,10 +546,8 @@ export function buildGroupPrompt({ roomId, mentionName = null, selfTalk = false 
     `【玩家】${personaG?.name || '(未命名玩家)'}:${personaG?.description || '(未提供描述)'}`,
     `【共享記憶】\n${formatMemories(sharedMemories, { withDateNote: true })}`,
     `【本聊天室記憶】\n${formatMemories(roomMemories)}`,
-    `【世界書(依關鍵字觸發)】\n${loreText}`,
+    `【世界書(常駐)】\n${loreConstText}`,
     ...relationshipSection(participants),
-    ...(useRealTimeG ? nowSection(lastTsG) : []),
-    ...(participants.every((c) => c.noPhone) ? [] : [`【最近的社群動態(公開)】\n${recentFeedText(state, personaG?.id)}`]),
     ...(selfTalk ? [
       '【自聊模式】玩家目前沒有說話。你們自己聊起來：從共同知道的近期內容(群裡聊過的、公開動態、大家都知道的事)挑話題,'
       + '2~5 則，有來有往，可以互虧、可以歪樓；不要對玩家喊話，也不要代替玩家發言。',
@@ -565,7 +569,15 @@ export function buildGroupPrompt({ roomId, mentionName = null, selfTalk = false 
       : []),
   ].join('\n\n');
 
-  return { system, messages: recentMessages, meta: { maxReplyChars, roomType: 'group', roomId } };
+  // c1-擴(v100):群聊動態尾巴(現在時間/本輪觸發世界書/社群動態);自聊與點名指令刻意留
+  // system——那兩個模式本就逐次不同(快取斷一輪可接受),且自聊路徑會在尾端補合成訊息,
+  // 搬尾巴有連續同 role 風險。素材來源與可見性過濾照舊,隱私鐵律不動。
+  const tailedG = applyDynamicTail(recentMessages, [
+    ...(useRealTimeG ? nowSection(lastTsG) : []),
+    ...(loreTrig.length ? [`【世界書|本輪觸發】\n${loreTrig.map((e) => `- (${e.bookName}/${e.title}) ${e.content}`).join('\n')}`] : []),
+    ...(participants.every((c) => c.noPhone) ? [] : [`【最近的社群動態(公開)】\n${recentFeedText(state, personaG?.id)}`]),
+  ]);
+  return { system, messages: tailedG.messages, meta: { maxReplyChars, roomType: 'group', roomId, dynamicTail: tailedG.tail } };
 }
 
 /** 最近社群動態摘要(公開資訊，所有聊天 prompt 共用)。 */
@@ -649,7 +661,7 @@ export function buildStoryPrompt({ roomId }) {
   const participants = getRoomCharacters(room);
   const persona = personaForRoom(room);
 
-  const recentMessages = budgetSlice(getRoomMessages(roomId))
+  const recentMessages = budgetSlice(getRoomMessages(roomId), room) // c1-擴(v100):正文吃錨定裁切(封存清空訊息時錨同步歸零,見 memory.js)
     .slice()
     .map((m) => ({
       role: m.role === 'user' ? 'user' : 'assistant',
@@ -661,15 +673,21 @@ export function buildStoryPrompt({ roomId }) {
     }));
 
   const recentText = recentMessages.map((m) => m.content).join('\n');
-  const seen = new Set(); const lore = [];
-  for (const c of participants) {
-    for (const e of matchEntries({ characterId: c.id, roomId, recentText, presentNames: participants.map((pp) => pp.name) })) {
-      if (!seen.has(e.id)) { seen.add(e.id); lore.push(e); }
+  // 世界書:c1-擴(v100)拆兩層(同群聊,聯集後分常駐/觸發)
+  const unionLoreS = (rt) => {
+    const seen = new Set(); const acc = [];
+    for (const c of participants) {
+      for (const e of matchEntries({ characterId: c.id, roomId, recentText: rt, presentNames: participants.map((pp) => pp.name) })) {
+        if (!seen.has(e.id)) { seen.add(e.id); acc.push(e); }
+      }
     }
-  }
-  const loreText = lore.length
-    ? lore.map((e) => `- (${e.bookName}/${e.title}) ${e.content}`).join('\n')
-    : '(無被觸發的條目)';
+    return acc;
+  };
+  const loreConstS = unionLoreS('');
+  const loreTrigS = unionLoreS(recentText).filter((e) => !e.alwaysOn);
+  const loreConstTextS = loreConstS.length
+    ? loreConstS.map((e) => `- (${e.bookName}/${e.title}) ${e.content}`).join('\n')
+    : '(無常駐條目)';
 
   const sharedMemories = sortMemories(sharedMemoriesFor(persona?.id || state.defaultPersonaId));
   const roomMemories = sortMemories(state.memories.byRoomId[roomId] || []);
@@ -722,8 +740,7 @@ export function buildStoryPrompt({ roomId }) {
     ...relationshipSection(participants),
     `【共享記憶】\n${formatMemories(sharedMemories)}`,
     `【本場景記憶】\n${formatMemories(roomMemories)}`,
-    `【世界書(依關鍵字觸發)】\n${loreText}`,
-    ...(participants.every((c) => c.noPhone) ? [] : [`【最近的社群動態(公開；僅供了解角色近況，其發文時間與正文的劇情時間無關)】\n${recentFeedText(state, persona?.id)}`]),
+    `【世界書(常駐)】\n${loreConstTextS}`,
     promptEnS
       ? `【Reply Rules】${styleGuide} ${choiceGuide} Target ${Math.round(maxReplyChars * 0.6)}~${maxReplyChars} Chinese characters this turn; advance in beats, weaving dialogue, action and interiority. Write ONLY in Traditional Chinese (Taiwan). Use 「」 for quoted speech.`
       : `【回覆指令】${styleGuide} ${choiceGuide} 本回合目標 ${Math.round(maxReplyChars * 0.6)}~${maxReplyChars} 字，分幕推進，含對話/動作/心理。`,
@@ -733,7 +750,13 @@ export function buildStoryPrompt({ roomId }) {
       : []),
   ].join('\n\n');
 
-  return { system, messages: recentMessages, meta: { maxReplyChars, roomType: 'story', participantCount: participants.length, roomId } };
+  // c1-擴(v100):正文動態尾巴(本輪觸發世界書/社群動態);statusBar 留 system(玩家手動改,
+  // 頻率低,改的那刻斷一次快取可接受)。正文無 nowSection(以劇情時間為準,本就不注入)。
+  const tailedS = applyDynamicTail(recentMessages, [
+    ...(loreTrigS.length ? [`【世界書|本輪觸發】\n${loreTrigS.map((e) => `- (${e.bookName}/${e.title}) ${e.content}`).join('\n')}`] : []),
+    ...(participants.every((c) => c.noPhone) ? [] : [`【最近的社群動態(公開；僅供了解角色近況，其發文時間與正文的劇情時間無關)】\n${recentFeedText(state, persona?.id)}`]),
+  ]);
+  return { system, messages: tailedS.messages, meta: { maxReplyChars, roomType: 'story', participantCount: participants.length, roomId, dynamicTail: tailedS.tail } };
 }
 
 /**
@@ -775,6 +798,23 @@ function anniversarySection(characterId, roomId) {
 function formatCross(list) {
   if (!list.length) return '(無)';
   return list.map((x) => `- [${x.roomTitle}] ${x.speaker}:${x.content}`).join('\n');
+}
+
+
+/**
+ * c1-擴(v100):動態尾巴組裝+依修訂一併入最新 user 訊息文字最前(共用於群/正文;
+ * DM 版為 v95 原地實作,語意相同)。找不到 user 訊息時尾端補一則(前一則必為 assistant)。
+ */
+function applyDynamicTail(messages, tailParts) {
+  const parts = tailParts.filter(Boolean);
+  if (!parts.length) return { messages, tail: '' };
+  const tail = `【系統附註|以下為即時脈絡,只供理解,絕不可複述其格式或內容】\n\n${parts.join('\n\n')}`;
+  const out = messages.slice();
+  let li = -1;
+  for (let i = out.length - 1; i >= 0; i -= 1) { if (out[i].role === 'user') { li = i; break; } }
+  if (li >= 0) out[li] = { ...out[li], content: `${tail}\n\n${out[li].content}` };
+  else out.push({ role: 'user', content: tail });
+  return { messages: out, tail };
 }
 
 function speakerName(msg, state, room) {

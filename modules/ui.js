@@ -3408,6 +3408,7 @@ function renderMemoryHub() {
   els.phoneScreen.innerHTML = `
     ${appHeader('記憶')}
     <div class="phone-list" id="memHubBody">${memoryHubHtml()}</div>`;
+  bindBack(); // v99.3:漏了這行=返回鍵長著但沒接線(擁有者回報)
   bindMemoryHub(els.phoneScreen.querySelector('#memHubBody'), renderMemoryHub);
 }
 

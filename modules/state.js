@@ -132,7 +132,7 @@ function migrate(s) {
     // c1(④):上下文錨定裁切的錨(本單先做 DM)。null=尚未立錨,首次 buildPrompt 會立。
     // 分岔房不繼承:branchRoom 深拷貝會帶著母房的錨,但訊息複製時全換新 id,
     // 錨天然失效 → budgetSlice 走「錨失效重立」路徑(tests/cache.test.mjs 有斷言釘著)。
-    if (r.type === 'dm' && r.ctxAnchorMsgId === undefined) r.ctxAnchorMsgId = null;
+    if (['dm', 'group', 'story'].includes(r.type) && r.ctxAnchorMsgId === undefined) r.ctxAnchorMsgId = null; // c1-擴(v100):群/正文納入錨定
     // v97(w3):每房模型覆寫(空字串=跟隨全域)。所有房型補欄;主線生成才吃(chat.js 呼叫點決定)
     if (r.modelOverride === undefined) r.modelOverride = '';
     // v99(y3):待確認記憶提案的節流錨(上次提案時的訊息數)

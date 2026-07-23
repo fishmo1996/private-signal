@@ -135,5 +135,69 @@ const r = await generateReply(fuseCfg, big);
 t(r.ok === false && r.message.includes('單次請求過大'), '>120,000 字被擋下且文案如實');
 t(!r.message.includes('再試') && !r.message.includes('重按'), '文案不承諾重按有效');
 
+/* ============ c1-擴(v100):群聊+正文 ============ */
+const { buildGroupPrompt, buildStoryPrompt } = await import('../modules/prompt.js');
+const { createStory } = await import('../modules/rooms.js'); // createGroup 檔頭已引
+const { archiveChapter } = await import('../modules/memory.js');
+await saveApiConfig({ contextBudget: 20000 });
+
+const g2 = await createGroup('擴群', [A.id, B.id]);
+getRoomMessages(g2.id).push(
+  { id: 'g2a', role: 'user', senderId: 'player', content: '群裡聊咖啡', createdAt: NOW - 900 },
+  { id: 'g2b', role: 'character', senderId: A.id, content: '好喝', createdAt: NOW - 800 },
+);
+const sc2 = await createStory('擴正文', [A.id, B.id]);
+sc2.statusBar = '仲夏夜,湖畔';
+getRoomMessages(sc2.id).push(
+  { id: 's2a', role: 'user', senderId: 'player', content: '我提起咖啡的事', createdAt: NOW - 700 },
+  { id: 's2b', role: 'narrator', senderId: 'narrator', content: '湖風拂過。', createdAt: NOW - 600 },
+);
+await persist();
+
+// 斷言 1(群/正文版):穩定性+禁字
+const gp1 = buildGroupPrompt({ roomId: g2.id });
+const gp2 = buildGroupPrompt({ roomId: g2.id });
+t(gp1.system === gp2.system, '群聊:固定 state 連跑兩輪 system 逐字相等');
+t(!gp1.system.includes('現在是') && !gp1.system.includes('本輪觸發'), '群聊:system 不含現在是/本輪觸發');
+t(gp1.system.includes('常駐世界觀W0') && !gp1.system.includes('觸發條目W1'), '群聊:常駐留 system、觸發式不在');
+const sp1 = buildStoryPrompt({ roomId: sc2.id });
+const sp2 = buildStoryPrompt({ roomId: sc2.id });
+t(sp1.system === sp2.system, '正文:固定 state 連跑兩輪 system 逐字相等');
+t(!sp1.system.includes('現在是') && !sp1.system.includes('本輪觸發'), '正文:system 不含現在是/本輪觸發');
+t(sp1.system.includes('仲夏夜,湖畔'), '正文:statusBar 留 system(玩家手動改,頻率低)');
+
+// 斷言 2(群/正文版):尾巴完整性+修訂一位置
+t(gp1.meta.dynamicTail.includes('【現在時間】') && gp1.meta.dynamicTail.includes('觸發條目W1') && gp1.meta.dynamicTail.includes('公開動態P1'), '群聊:尾巴含現在時間+觸發世界書+社群動態');
+const gLastUser = [...gp1.messages].reverse().find((m) => m.role === 'user');
+t(gLastUser.content.startsWith('【系統附註|') && gLastUser.content.includes('群裡聊咖啡'), '群聊:尾巴併入最新 user 訊息最前,原文仍在');
+t(sp1.meta.dynamicTail.includes('觸發條目W1') && sp1.meta.dynamicTail.includes('公開動態P1') && !sp1.meta.dynamicTail.includes('【現在時間】'), '正文:尾巴含觸發世界書+動態、無現在時間(劇情時間制)');
+const sLastUser = [...sp1.messages].reverse().find((m) => m.role === 'user');
+t(sLastUser.content.startsWith('【系統附註|') && sLastUser.content.includes('我提起咖啡的事'), '正文:尾巴併入最新 user 訊息最前');
+
+// 斷言 3(擴):群/正文房吃錨;旁觀不吃
+t(typeof g2.ctxAnchorMsgId === 'string' && g2.ctxAnchorMsgId.length > 0, '群聊:建構後已立錨');
+t(typeof sc2.ctxAnchorMsgId === 'string', '正文:建構後已立錨');
+const pkMsgs = [mk(91), mk(92), mk(93)];
+t(budgetSlice(pkMsgs, { id: 'pk-x', type: 'peek' }).length >= 2, '旁觀房:不帶入錨定(舊行為)');
+
+// 斷言 3b:封存互動——封存清空訊息+錨歸零,下一章重立不拋錯
+globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: '["前情A"]' } }], usage: {} }) });
+await saveApiConfig({ provider: 'openai', apiKey: 'k', model: 'm', useRealApi: true });
+getRoomMessages(sc2.id).push(
+  { id: 's2c', role: 'user', senderId: 'player', content: '續', createdAt: NOW - 500 },
+  { id: 's2d', role: 'narrator', senderId: 'narrator', content: '夜深。', createdAt: NOW - 400 },
+);
+const ar = await archiveChapter(sc2.id, { title: '首章' });
+t(ar.ok && sc2.ctxAnchorMsgId === null, '封存章節:錨同步歸零');
+getRoomMessages(sc2.id).push({ id: 's3a', role: 'user', senderId: 'player', content: '新章開場', createdAt: NOW - 300 });
+let spOk = true; let sp3 = null;
+try { sp3 = buildStoryPrompt({ roomId: sc2.id }); } catch { spOk = false; }
+t(spOk && sc2.ctxAnchorMsgId !== null, '封存後下一章:不拋錯、自動重立新錨');
+t(sp3.system.includes('首章|前情'), '封存摘要以場景記憶回到 system(前情不失憶)');
+
+// 斷言 4(擴):隱私——群/正文的尾巴仍拿不到任何私密
+t(!JSON.stringify(gp1).includes('TAIL9') && !JSON.stringify(gp1).includes('私密記憶M1'), '群聊整包(含尾巴):零私密記憶');
+t(!JSON.stringify(sp1).includes('TAIL9') && !JSON.stringify(sp1).includes('私密記憶M1'), '正文整包(含尾巴):零私密記憶');
+
 Date.now = realNow;
 summary('c1 快取分層');

@@ -358,7 +358,15 @@ export async function generateReply(cfg, prompt, opts = {}) {
       if (!text && cfg.provider === 'gemini' && data?.candidates?.[0]?.finishReason === 'MAX_TOKENS') {
         return { ok: false, message: '輸出額度被思考(thinking)吃光了,不是內容審查——再按一次通常就好;常發生的話到 API 設定把 thinkingBudget 設 0(關思考)或調低。' };
       }
-      if (!text) return { ok: false, message: '這一則被模型服務暫時擋下(內容審查誤判或長度不足),再試一次通常就好——與你的內容無關。' };
+      if (!text) {
+        // v99.4:空回覆不再進「不明原因垃圾桶」——把 finishReason 如實吐出,懸案才有線索
+        // (擁有者實案:心聲頻繁難產、非安全非額度,舊文案把原因代碼吞掉導致無從診斷)
+        const fr = cfg.provider === 'gemini' ? (data?.candidates?.[0]?.finishReason || '無 candidate') : '';
+        if (fr === 'RECITATION') {
+          return { ok: false, message: '模型因「複述保護」(RECITATION)自行中止——它怕輸出跟受版權保護的文字太像,與內容審查無關。重按通常會過;常發生的話把最近一句改寫得更口語、少引用歌詞或書句。' };
+        }
+        return { ok: false, message: `這一則被模型服務暫時擋下(${fr ? `原因代碼:${fr}` : '內容審查誤判或長度不足'}),再試一次通常就好——與你的內容無關。` };
+      }
       const cap = prompt.meta?.maxReplyChars || 800;
       return { ok: true, text: text.length > cap ? `${text.slice(0, cap)}…` : text };
     } catch (err) {

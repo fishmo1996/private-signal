@@ -17,7 +17,7 @@ const { createCharacter, createStory, createGroup, createPeek, openRoom } = awai
 const { sendUserMessage } = await import('../modules/chat.js');
 const { saveApiConfig } = await import('../modules/api.js');
 const ui = await import('../modules/ui.js');
-const { initNavigation, navigate } = await import('../modules/navigation.js');
+const { initNavigation, navigate, getView } = await import('../modules/navigation.js');
 await initDB(); await clearState();
 await initState({appName:'私人訊號',defaultPlayer:{playerName:'測試'},defaultSettings:{}});
 let pass=0,fail=0; const t=(c,n)=>{c?(pass++):(fail++,console.log('FAIL',n));};
@@ -27,7 +27,7 @@ const sc=await createStory('s',[a.id]); const g=await createGroup('g',[a.id,b.id
 await saveApiConfig({useRealApi:true,provider:'gemini',apiKey:'K',model:'m'});
 const mock=(text)=>{ globalThis.fetch=async()=>({ok:true,json:async()=>({candidates:[{content:{parts:[{text}]}}]})}); };
 initNavigation(); ui.initUI({appName:'私人訊號'});
-for(const v of ['home','chat-friends','chat-rooms','chat-peek','social-feed','story-list','people','player','worldbook','settings','album','search','char-phone']){
+for(const v of ['home','chat-friends','chat-rooms','chat-peek','social-feed','story-list','people','player','worldbook','settings','album','search','char-phone','memory-hub']){
   try{ await navigate(v); ui.renderAll(); t(true,v);}catch(e){ t(false,`${v}: ${e.message}`);} }
 for(const r of [dm.id,sc.id,g.id,pk.id]){ try{ await openRoom(r); ui.renderAll(); t(true,'room');}catch(e){ t(false,'room '+e.message);} }
 await openRoom(sc.id); ui.renderAll();
@@ -40,5 +40,17 @@ mock(JSON.stringify([{name:'甲',content:'x'},{name:'乙',content:'y'}]));
 const sb=document.querySelector('#btnSelfChat'); t(!!sb,'↻存在');
 if(sb){ sb.dispatchEvent(new dom.window.Event('click')); await new Promise(r=>setTimeout(r,3200));
   t(getState().messagesByRoom[pk.id].filter(m=>m.role==='character').length>=2,'旁觀自燃'); }
+
+// v99.3(擁有者回報記憶頁返回失靈的教訓):逐頁實測「按返回真的回得去」——渲染後點 #btnBack,view 必須變
+for (const v of ['memory-hub', 'worldbook', 'album', 'settings']) {
+  await navigate(v); ui.renderAll();
+  const btn = document.getElementById('btnBack');
+  if (!btn) { t(false, `${v}:找不到返回鍵`); continue; }
+  btn.click();
+  await new Promise((res) => setTimeout(res, 30)); // 等 async back()+renderAll
+  t(getView() === 'home', `${v}:按返回真的回到主畫面`);
+}
+
 t(errors.length===0,'零 unhandled: '+errors.slice(0,2));
 console.log(`煙霧測:${pass} 通過, ${fail} 失敗`); process.exit(fail?1:0);
+
