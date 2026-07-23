@@ -940,7 +940,7 @@ function renderMessages() {
       return `
         <div class="msg-narrator">
           <div class="narrator-body">${esc(m.content).replaceAll('\n', '<br>')}${choicesHtml}</div>
-          ${Object.entries(m.innerVoices || {}).map(([cid, txt]) => `<div class="inner-voice" data-iv-card="${esc(m.id)}:${esc(cid)}" hidden><b>${esc(getCharacter(cid)?.name || '?')}</b>:${esc(txt).replaceAll('\n', '<br>')}</div>`).join('')}
+          ${Object.entries(m.innerVoices || {}).map(([cid, txt]) => `<div class="inner-voice" data-iv-card="${esc(m.id)}:${esc(cid)}" hidden><b>${esc(getCharacter(cid)?.name || '?')}</b>:${esc(txt).replaceAll('\n', '<br>')} <button class="iv-redo" data-iv-redo="${esc(m.id)}" data-iv-redo-cid="${esc(cid)}" title="重抽這段心聲">↻</button></div>`).join('')}
           <div class="msg-meta">${time}${rememberBtn}${speakBtn}</div>
         </div>`;
     }
@@ -985,7 +985,7 @@ function renderMessages() {
             </div>
             <div class="voice-transcript">${esc(m.content).replaceAll('\n', '<br>')}</div>${choicesHtml}`
     : `<div class="bubble char-bubble" style="--c:${esc(c ? c.themeColor : '#6b7280')}">${imgHtml}${esc(m.content).replaceAll('\n', '<br>')}</div>${choicesHtml}`}
-          ${m.innerVoice ? `<div class="inner-voice" data-iv-card="${esc(m.id)}" hidden>${esc(m.innerVoice).replaceAll('\n', '<br>')}</div>` : ''}
+          ${m.innerVoice ? `<div class="inner-voice" data-iv-card="${esc(m.id)}" hidden>${esc(m.innerVoice).replaceAll('\n', '<br>')} <button class="iv-redo" data-iv-redo="${esc(m.id)}" title="重抽這段心聲">↻</button></div>` : ''}
           ${m.drift ? '<div class="drift-hint">⚠ 這則走鐘了(旁白/劇本腔)——按下方「↻ 重新生成」通常會回魂</div>' : ''}
           <div class="msg-meta">${time}${rememberBtn}</div>
         </div>
@@ -1104,6 +1104,18 @@ function renderMessages() {
       renderMessages();
       const c2 = document.getElementById('messages')?.querySelector(`[data-iv-card="${mid}"]`);
       if (c2) c2.hidden = false;
+    });
+  });
+  wrap.querySelectorAll('[data-iv-redo]').forEach((btn) => { // v101.1:心聲重抽(擁有者:「心聲是不能重來的⋯⋯」——現在能了)
+    btn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      btn.disabled = true; btn.textContent = '…';
+      const r = await generateInnerVoice(room.id, btn.dataset.ivRedo, btn.dataset.ivRedoCid || null, { force: true });
+      if (!r.ok) { alert(r.message); btn.disabled = false; btn.textContent = '↻'; return; }
+      renderMessages();
+      const key = btn.dataset.ivRedoCid ? `${btn.dataset.ivRedo}:${btn.dataset.ivRedoCid}` : btn.dataset.ivRedo;
+      const c3 = document.getElementById('messages')?.querySelector(`[data-iv-card="${key}"]`);
+      if (c3) c3.hidden = false;
     });
   });
   wrap.querySelectorAll('[data-msg-branch]').forEach((btn) => {
@@ -2830,6 +2842,10 @@ function renderSettings() {
         <span class="setting-label">記憶提案收件匣<br><span class="setting-hint">DM 每聊一小段,AI 用次要模型提案「值得記的事」進收件匣,你逐筆批准才入庫(每輪多一次小額呼叫;預設關)</span></span>
         <input type="checkbox" id="chkMemInbox" ${state.settings.memoryInboxOn === true ? 'checked' : ''}>
       </label>
+      <label class="setting-row">
+        <span class="setting-label">心聲走主模型<br><span class="setting-hint">心聲改用主模型生成(文筆與身分服從度更好,單次成本較高;預設用便宜的次要模型)</span></span>
+        <input type="checkbox" id="chkIvMain" ${state.settings.innerVoiceMainModel === true ? 'checked' : ''}>
+      </label>
 
       <div class="people-heading">AI 連線(API / LLM)</div>
       <div class="panel-note">金鑰只存在這台電腦的瀏覽器裡。目前對話仍使用本機假回覆；這裡先把連線設定準備好，串接時即可直接使用。</div>
@@ -3090,6 +3106,10 @@ function renderSettings() {
   });
   els.phoneScreen.querySelector('#chkMemInbox').addEventListener('change', async (e) => { // v99(y3)
     state.settings.memoryInboxOn = e.target.checked;
+    await persist();
+  });
+  els.phoneScreen.querySelector('#chkIvMain').addEventListener('change', async (e) => { // v101.1
+    state.settings.innerVoiceMainModel = e.target.checked;
     await persist();
   });
   els.phoneScreen.querySelector('#chkStoryChoices').addEventListener('change', async (e) => {
@@ -3420,7 +3440,7 @@ function renderManual() {
     ${q('讓群組裡特定的人回話', '打字時 @他的名字=點名,他必回、其他人自由。沒人說話時按 ↻ 他們會自己聊起來。')}
     ${q('跑長篇劇情(正文)', '正文=說書人模式。結尾的 ▷ 選項可點可無視,自己打字也行。時間/地點/衣著錯了,用輸入框上方「⊕ 設定場景狀態」餵正確的——那是最高事實,說書人必須聽。')}
     ${q('看他們背著你聊什麼', '旁觀群=你不在裡面的群。按 ↻ 刷新他們的對話;他們的訊息也能看心聲。')}
-    ${q('看他沒說出口的想法(心聲)', '訊息旁的 👁。心聲只給你看,絕不會影響之後的劇情。走便宜模型;覺得文筆不夠香可以來點「心聲走主模型」的單(還沒做)。')}
+    ${q('看他沒說出口的想法(心聲)', '訊息旁的 👁。心聲只給你看,絕不會影響之後的劇情。卡片上的 ↻ 可以重抽。預設走便宜模型;設定開「心聲走主模型」文筆更好但較貴。')}
     ${q('偷看他的手機', '角色頁的偷看功能:看得到他的日記、跟你的 DM。')}
 
     ${h2('記憶(他會不會忘記事情)')}
@@ -3454,6 +3474,7 @@ function renderManual() {
     ${q('失敗:「原因代碼:RECITATION」', '模型怕輸出太像版權文字(歌詞/書句)。改寫得更口語,重按通常會過。')}
     ${q('命中率一直很低', '① 確認部署了新版(開發資訊看版本號,不對就 Ctrl+F5);② 同一房連跑幾輪再看,它是 7 日平均,爬得慢。')}
     ${q('角色複述奇怪的系統格式(鸚鵡)', '有自動清潔器在攔。漏網的截圖回報,清潔器會加案例。')}
+    ${q('心聲寫成別人的視角/旁白', '卡片上按 ↻ 重抽,通常一次就正。多人正文常發生的話,設定開「心聲走主模型」。')}
     ${q('正文時間錯亂', '「⊕ 設定場景狀態」餵正確的時間地點,它必須聽。')}
     ${q('回報問題的正確姿勢', '三樣:版本號(開發資訊裡)+錯誤訊息原文(整句)+在哪種房(DM/群/正文/旁觀)。有這三樣,下一個 AI 一發入魂。')}
     </div>`;

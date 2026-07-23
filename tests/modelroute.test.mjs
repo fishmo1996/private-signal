@@ -54,8 +54,8 @@ t(reloaded.modelOverride === '', 'migrate:重開機後所有房補 modelOverride
 const chatSrc = readFileSync(new URL('../modules/chat.js', import.meta.url), 'utf8');
 t((chatSrc.match(/modelOverride: room\.modelOverride/g) || []).length >= 5,
   'chat.js 主線呼叫點(DM/主動/群包/群solo/正文)帶 modelOverride(≥5 處)');
-t(chatSrc.includes("generateReply(cfg, prompt, { tier: 'secondary' })"),
-  '心聲呼叫點維持 tier secondary、不帶覆寫');
+t(chatSrc.includes("innerVoiceMainModel === true ? {} : { tier: 'secondary' }"),
+  '心聲呼叫點:預設 tier secondary,開關開才走主模型(v101.1),仍不帶房間覆寫');
 const hygiene = ['diary.js', 'phonepeek.js', 'social.js', 'memory.js']
   .every((f) => !readFileSync(new URL(`../modules/${f}`, import.meta.url), 'utf8').includes('modelOverride'));
 t(hygiene, '雜務模組(日記/偷看/社群/摘要)零 modelOverride 字樣(不吃覆寫)');

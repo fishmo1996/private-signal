@@ -620,7 +620,7 @@ function applyStatusTag(character, statusText) {
   character.status = { text: statusText, at: Date.now() };
 }
 
-export async function generateInnerVoice(roomId, messageId, characterId = null) {
+export async function generateInnerVoice(roomId, messageId, characterId = null, { force = false } = {}) { // v101.1:force=重抽(擁有者:「心聲是不能重來的⋯⋯」)
   const room = getRoom(roomId);
   if (!room) return { ok: false, message: '找不到房間' };
   // v96(y1):旁觀群開放心聲——單人生成、素材=本人 DM 等級(v85 群@單人前例);心聲永不回流,隱私鐵律不破
@@ -636,10 +636,12 @@ export async function generateInnerVoice(roomId, messageId, characterId = null) 
   }
   if (!character) return { ok: false, message: msg.role === 'narrator' ? '請選擇要窺探的角色' : '只有角色的訊息有心聲' };
 
-  // 快取：角色訊息單欄；旁白多人欄
-  if (msg.role === 'character' && msg.innerVoice) return { ok: true, cached: true, text: msg.innerVoice };
-  if (msg.role === 'narrator' && msg.innerVoices?.[character.id]) {
-    return { ok: true, cached: true, text: msg.innerVoices[character.id] };
+  // 快取：角色訊息單欄；旁白多人欄。v101.1:force 時跳過快取重打(生成成功才覆蓋舊的)
+  if (!force) {
+    if (msg.role === 'character' && msg.innerVoice) return { ok: true, cached: true, text: msg.innerVoice };
+    if (msg.role === 'narrator' && msg.innerVoices?.[character.id]) {
+      return { ok: true, cached: true, text: msg.innerVoices[character.id] };
+    }
   }
   const busyKey = `${messageId}:${character.id}`;
   if (innerVoiceBusy.has(busyKey)) return { ok: false, message: '生成中…' };
@@ -652,7 +654,7 @@ export async function generateInnerVoice(roomId, messageId, characterId = null) 
         ? buildPrompt({ character, roomId, innerVoiceOf: messageId })
         : buildRoomInnerVoicePrompt({ character, roomId, messageId });
       if (!prompt) return { ok: false, message: '這個房型不支援心聲' };
-      const r = await generateReply(cfg, prompt, { tier: 'secondary' });
+      const r = await generateReply(cfg, prompt, getState().settings?.innerVoiceMainModel === true ? {} : { tier: 'secondary' }); // v101.1:心聲走主模型開關(預設關;刻意不吃房間覆寫,w3 雜務原則)
       if (!r.ok) return { ok: false, message: r.message };
       const allNames = room.type === 'dm' ? [character.name] : getRoomCharacters(room).map((cc) => cc.name); // v84.4:群/正文剝全員前綴(模型冒名時別人的「名字:」不能漏出)
       text = stripNamePrefix(r.text, allNames).trim();
