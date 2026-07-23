@@ -27,7 +27,7 @@ const sc=await createStory('s',[a.id]); const g=await createGroup('g',[a.id,b.id
 await saveApiConfig({useRealApi:true,provider:'gemini',apiKey:'K',model:'m'});
 const mock=(text)=>{ globalThis.fetch=async()=>({ok:true,json:async()=>({candidates:[{content:{parts:[{text}]}}]})}); };
 initNavigation(); ui.initUI({appName:'私人訊號'});
-for(const v of ['home','chat-friends','chat-rooms','chat-peek','social-feed','story-list','people','player','worldbook','settings','album','search','char-phone','memory-hub']){
+for(const v of ['home','chat-friends','chat-rooms','chat-peek','social-feed','story-list','people','player','worldbook','settings','album','search','char-phone','memory-hub','manual']){
   try{ await navigate(v); ui.renderAll(); t(true,v);}catch(e){ t(false,`${v}: ${e.message}`);} }
 for(const r of [dm.id,sc.id,g.id,pk.id]){ try{ await openRoom(r); ui.renderAll(); t(true,'room');}catch(e){ t(false,'room '+e.message);} }
 await openRoom(sc.id); ui.renderAll();
@@ -42,7 +42,7 @@ if(sb){ sb.dispatchEvent(new dom.window.Event('click')); await new Promise(r=>se
   t(getState().messagesByRoom[pk.id].filter(m=>m.role==='character').length>=2,'旁觀自燃'); }
 
 // v99.3(擁有者回報記憶頁返回失靈的教訓):逐頁實測「按返回真的回得去」——渲染後點 #btnBack,view 必須變
-for (const v of ['memory-hub', 'worldbook', 'album', 'settings']) {
+for (const v of ['memory-hub', 'manual', 'worldbook', 'album', 'settings']) {
   await navigate(v); ui.renderAll();
   const btn = document.getElementById('btnBack');
   if (!btn) { t(false, `${v}:找不到返回鍵`); continue; }

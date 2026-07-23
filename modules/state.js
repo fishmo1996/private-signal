@@ -230,7 +230,7 @@ function migrate(s) {
   const KNOWN_VIEWS = [
     'home', 'chat-friends', 'chat-rooms', 'chat-peek', 'chat-room', 'social-feed', 'social-post',
     'story-list', 'story-room', 'people', 'people-character', 'settings',
-    'worldbook', 'worldbook-detail', 'character-diary', 'player', 'album', 'search', 'memory-hub',
+    'worldbook', 'worldbook-detail', 'character-diary', 'player', 'album', 'search', 'memory-hub', 'manual',
   ];
   if (!KNOWN_VIEWS.includes(s.phoneView)) s.phoneView = 'home';
   return s;
